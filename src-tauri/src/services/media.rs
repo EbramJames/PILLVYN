@@ -1,5 +1,17 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MediaSessionSummary {
+    pub source_id: String,
+    pub source_app: String,
+    pub title: String,
+    pub artist: String,
+    pub status: String,
+    pub is_active: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MediaSnapshot {
@@ -17,6 +29,19 @@ pub struct MediaSnapshot {
     pub can_previous: bool,
     pub can_seek: bool,
     pub thumbnail_data_url: Option<String>,
+    #[serde(default)]
+    pub sessions: Vec<MediaSessionSummary>,
+}
+
+static PREFERRED_SOURCE_ID: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn select_media_session(source_id: Option<&str>) {
+    if let Ok(mut guard) = PREFERRED_SOURCE_ID.lock() {
+        *guard = source_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+    }
 }
 
 impl Default for MediaSnapshot {
@@ -36,6 +61,7 @@ impl Default for MediaSnapshot {
             can_previous: false,
             can_seek: false,
             thumbnail_data_url: None,
+            sessions: Vec::new(),
         }
     }
 }
@@ -54,12 +80,26 @@ pub fn friendly_source_name(aumid: &str) -> String {
         "Firefox".to_string()
     } else if lower.contains("brave") {
         "Brave".to_string()
+    } else if lower.contains("opera") {
+        "Opera".to_string()
+    } else if lower.contains("yandex") {
+        "Yandex Browser".to_string()
     } else if lower.contains("applemusic") {
         "Apple Music".to_string()
     } else if lower.contains("tidal") {
         "TIDAL".to_string()
+    } else if lower.contains("amazonmusic") {
+        "Amazon Music".to_string()
     } else if lower.contains("foobar") {
         "foobar2000".to_string()
+    } else if lower.contains("musicbee") {
+        "MusicBee".to_string()
+    } else if lower.contains("winamp") {
+        "Winamp".to_string()
+    } else if lower.contains("mpv") {
+        "mpv".to_string()
+    } else if lower.contains("kodi") {
+        "Kodi".to_string()
     } else if lower.contains("zune") || lower.contains("mediaplayer") {
         "Media Player".to_string()
     } else if lower.contains("discord") {
@@ -99,32 +139,12 @@ impl ThumbnailCache {
 }
 
 #[cfg(target_os = "windows")]
-pub fn query_media_snapshot(cache: &mut ThumbnailCache) -> MediaSnapshot {
-    use windows::Media::Control::{
-        GlobalSystemMediaTransportControlsSessionManager,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus,
-    };
-    use windows::Storage::Streams::DataReader;
+fn playback_status_str(
+    session: &windows::Media::Control::GlobalSystemMediaTransportControlsSession,
+) -> (String, bool, bool, bool) {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
 
-    let Ok(mgr_op) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() else {
-        return MediaSnapshot::default();
-    };
-    let Ok(manager) = mgr_op.get() else {
-        return MediaSnapshot::default();
-    };
-
-    let Ok(session) = manager.GetCurrentSession() else {
-        return MediaSnapshot::default();
-    };
-
-    let source_id = session
-        .SourceAppUserModelId()
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-    let source_app = friendly_source_name(&source_id);
-
-    let playback = session.GetPlaybackInfo();
-    let (status_str, can_play_pause, can_next, can_previous) = match playback {
+    match session.GetPlaybackInfo() {
         Ok(info) => {
             let st = match info.PlaybackStatus() {
                 Ok(GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) => "Playing",
@@ -153,7 +173,123 @@ pub fn query_media_snapshot(cache: &mut ThumbnailCache) -> MediaSnapshot {
             (st.to_string(), pp, nx, pv)
         }
         Err(_) => ("Closed".to_string(), false, false, false),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_sessions(
+    manager: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager,
+    preferred_source_id: Option<&str>,
+) -> (
+    Option<windows::Media::Control::GlobalSystemMediaTransportControlsSession>,
+    Vec<MediaSessionSummary>,
+) {
+    let mut list = Vec::new();
+    let mut picked: Option<windows::Media::Control::GlobalSystemMediaTransportControlsSession> =
+        None;
+    let current_id = manager
+        .GetCurrentSession()
+        .ok()
+        .and_then(|s| s.SourceAppUserModelId().ok())
+        .map(|s| s.to_string());
+
+    if let Ok(sessions) = manager.GetSessions() {
+        let count = sessions.Size().unwrap_or(0).min(8);
+        let mut items = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            if let Ok(sess) = sessions.GetAt(i) {
+                let sid = sess
+                    .SourceAppUserModelId()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let (status, _, _, _) = playback_status_str(&sess);
+                let (title, artist) = match sess.TryGetMediaPropertiesAsync() {
+                    Ok(op) => match op.get() {
+                        Ok(props) => (
+                            props.Title().map(|s| s.to_string()).unwrap_or_default(),
+                            props.Artist().map(|s| s.to_string()).unwrap_or_default(),
+                        ),
+                        Err(_) => (String::new(), String::new()),
+                    },
+                    Err(_) => (String::new(), String::new()),
+                };
+                items.push((sess, sid, status, title, artist));
+            }
+        }
+
+        // Priority: explicit user selection (if present) -> playing current session -> any playing session -> current session -> first session
+        let selected_idx = preferred_source_id
+            .and_then(|pref| items.iter().position(|(_, sid, _, _, _)| sid == pref))
+            .or_else(|| {
+                items.iter().position(|(_, sid, status, _, _)| {
+                    status == "Playing" && current_id.as_deref() == Some(sid.as_str())
+                })
+            })
+            .or_else(|| {
+                items
+                    .iter()
+                    .position(|(_, _, status, _, _)| status == "Playing")
+            })
+            .or_else(|| {
+                items
+                    .iter()
+                    .position(|(_, sid, _, _, _)| current_id.as_deref() == Some(sid.as_str()))
+            })
+            .or_else(|| (!items.is_empty()).then_some(0));
+
+        for (idx, (sess, sid, status, title, artist)) in items.into_iter().enumerate() {
+            let is_active = selected_idx == Some(idx);
+            if is_active {
+                picked = Some(sess);
+            }
+            list.push(MediaSessionSummary {
+                source_app: friendly_source_name(&sid),
+                source_id: sid,
+                title,
+                artist,
+                status,
+                is_active,
+            });
+        }
+    }
+
+    if picked.is_none() {
+        picked = manager.GetCurrentSession().ok();
+    }
+    (picked, list)
+}
+
+#[cfg(target_os = "windows")]
+pub fn query_media_snapshot(cache: &mut ThumbnailCache) -> MediaSnapshot {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+    use windows::Storage::Streams::DataReader;
+
+    let Ok(mgr_op) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() else {
+        return MediaSnapshot::default();
     };
+    let Ok(manager) = mgr_op.get() else {
+        return MediaSnapshot::default();
+    };
+
+    let preferred = PREFERRED_SOURCE_ID
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    let (maybe_session, sessions) = resolve_sessions(&manager, preferred.as_deref());
+    let Some(session) = maybe_session else {
+        return MediaSnapshot {
+            sessions,
+            ..MediaSnapshot::default()
+        };
+    };
+
+    let source_id = session
+        .SourceAppUserModelId()
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let source_app = friendly_source_name(&source_id);
+
+    let (status_str, can_play_pause, can_next, can_previous) = playback_status_str(&session);
 
     let (title, artist, album, thumb_ref) = match session.TryGetMediaPropertiesAsync() {
         Ok(op) => match op.get() {
@@ -231,6 +367,7 @@ pub fn query_media_snapshot(cache: &mut ThumbnailCache) -> MediaSnapshot {
         can_previous,
         can_seek: duration_sec > 1.0,
         thumbnail_data_url,
+        sessions,
     }
 }
 
@@ -239,18 +376,36 @@ pub fn query_media_snapshot(_cache: &mut ThumbnailCache) -> MediaSnapshot {
     MediaSnapshot::default()
 }
 
-#[cfg(target_os = "windows")]
 pub fn control_media(action: &str, seek_sec: Option<f64>) -> Result<(), String> {
+    control_media_for_source(action, seek_sec, None)
+}
+
+#[cfg(target_os = "windows")]
+pub fn control_media_for_source(
+    action: &str,
+    seek_sec: Option<f64>,
+    source_id: Option<&str>,
+) -> Result<(), String> {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+
+    if action == "select_session" {
+        select_media_session(source_id);
+        return Ok(());
+    }
 
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
         .map_err(|e| format!("GSMTC unavailable: {e}"))?
         .get()
         .map_err(|e| format!("GSMTC manager error: {e}"))?;
 
-    let session = manager
-        .GetCurrentSession()
-        .map_err(|_| "No active Windows media session".to_string())?;
+    let target_pref = source_id.map(ToOwned::to_owned).or_else(|| {
+        PREFERRED_SOURCE_ID
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    });
+    let (session_opt, _) = resolve_sessions(&manager, target_pref.as_deref());
+    let session = session_opt.ok_or_else(|| "No active Windows media session".to_string())?;
 
     match action {
         "play_pause" => {
@@ -259,6 +414,20 @@ pub fn control_media(action: &str, seek_sec: Option<f64>) -> Result<(), String> 
                 .map_err(|e| format!("Play/Pause failed: {e}"))?
                 .get()
                 .map_err(|e| format!("Play/Pause error: {e}"))?;
+        }
+        "play" => {
+            session
+                .TryPlayAsync()
+                .map_err(|e| format!("Play failed: {e}"))?
+                .get()
+                .map_err(|e| format!("Play error: {e}"))?;
+        }
+        "pause" => {
+            session
+                .TryPauseAsync()
+                .map_err(|e| format!("Pause failed: {e}"))?
+                .get()
+                .map_err(|e| format!("Pause error: {e}"))?;
         }
         "next" => {
             session
@@ -290,8 +459,167 @@ pub fn control_media(action: &str, seek_sec: Option<f64>) -> Result<(), String> 
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn control_media(_action: &str, _seek_sec: Option<f64>) -> Result<(), String> {
+pub fn control_media_for_source(
+    _action: &str,
+    _seek_sec: Option<f64>,
+    _source_id: Option<&str>,
+) -> Result<(), String> {
     Err("Media controls require Windows".into())
+}
+
+/// Spawns a WinRT GSMTC event listener thread that wakes `notify` immediately whenever
+/// media sessions change, playback state toggles, metadata updates, or timeline scrubs.
+pub fn spawn_media_event_listener(notify: Arc<Notify>) {
+    #[cfg(target_os = "windows")]
+    {
+        std::thread::Builder::new()
+            .name("pillvyn-gsmtc-events".into())
+            .spawn(move || {
+                use std::sync::mpsc;
+                use windows::Foundation::{EventRegistrationToken, TypedEventHandler};
+                use windows::Media::Control::{
+                    CurrentSessionChangedEventArgs, GlobalSystemMediaTransportControlsSession,
+                    GlobalSystemMediaTransportControlsSessionManager,
+                    MediaPropertiesChangedEventArgs, PlaybackInfoChangedEventArgs,
+                    SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
+                };
+                use windows::Win32::System::Com::{
+                    CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
+                };
+
+                struct ComScope(bool);
+                impl Drop for ComScope {
+                    fn drop(&mut self) {
+                        if self.0 {
+                            unsafe {
+                                CoUninitialize();
+                            }
+                        }
+                    }
+                }
+
+                let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                let _com = ComScope(hr.is_ok());
+
+                let mut manager: Option<GlobalSystemMediaTransportControlsSessionManager> = None;
+                for _ in 0..4 {
+                    if let Ok(op) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+                    {
+                        if let Ok(mgr) = op.get() {
+                            manager = Some(mgr);
+                            break;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(750));
+                }
+                let Some(manager) = manager else {
+                    return;
+                };
+
+                let (rebind_tx, rebind_rx) = mpsc::channel::<()>();
+
+                let n_cur = Arc::clone(&notify);
+                let tx_cur = rebind_tx.clone();
+                let _cur_tok =
+                    manager.CurrentSessionChanged(&TypedEventHandler::<
+                        GlobalSystemMediaTransportControlsSessionManager,
+                        CurrentSessionChangedEventArgs,
+                    >::new(move |_, _| {
+                        n_cur.notify_one();
+                        let _ = tx_cur.send(());
+                        Ok(())
+                    }));
+
+                let n_sess = Arc::clone(&notify);
+                let tx_sess = rebind_tx.clone();
+                let _sess_tok = manager.SessionsChanged(&TypedEventHandler::<
+                    GlobalSystemMediaTransportControlsSessionManager,
+                    SessionsChangedEventArgs,
+                >::new(move |_, _| {
+                    n_sess.notify_one();
+                    let _ = tx_sess.send(());
+                    Ok(())
+                }));
+
+                type BoundSession = (
+                    GlobalSystemMediaTransportControlsSession,
+                    EventRegistrationToken,
+                    EventRegistrationToken,
+                    EventRegistrationToken,
+                );
+                let mut bound: Vec<BoundSession> = Vec::new();
+
+                let _ = rebind_tx.send(());
+                while rebind_rx.recv().is_ok() {
+                    while rebind_rx.try_recv().is_ok() {}
+
+                    for (sess, pb, mp, tl) in bound.drain(..) {
+                        if pb.Value != 0 {
+                            let _ = sess.RemovePlaybackInfoChanged(pb);
+                        }
+                        if mp.Value != 0 {
+                            let _ = sess.RemoveMediaPropertiesChanged(mp);
+                        }
+                        if tl.Value != 0 {
+                            let _ = sess.RemoveTimelinePropertiesChanged(tl);
+                        }
+                    }
+
+                    if let Ok(sessions) = manager.GetSessions() {
+                        let count = sessions.Size().unwrap_or(0).min(8);
+                        for i in 0..count {
+                            if let Ok(sess) = sessions.GetAt(i) {
+                                let n1 = Arc::clone(&notify);
+                                let pb = sess
+                                    .PlaybackInfoChanged(&TypedEventHandler::<
+                                        GlobalSystemMediaTransportControlsSession,
+                                        PlaybackInfoChangedEventArgs,
+                                    >::new(
+                                        move |_, _| {
+                                            n1.notify_one();
+                                            Ok(())
+                                        },
+                                    ))
+                                    .unwrap_or_default();
+
+                                let n2 = Arc::clone(&notify);
+                                let mp = sess
+                                    .MediaPropertiesChanged(&TypedEventHandler::<
+                                        GlobalSystemMediaTransportControlsSession,
+                                        MediaPropertiesChangedEventArgs,
+                                    >::new(
+                                        move |_, _| {
+                                            n2.notify_one();
+                                            Ok(())
+                                        },
+                                    ))
+                                    .unwrap_or_default();
+
+                                let n3 = Arc::clone(&notify);
+                                let tl = sess
+                                    .TimelinePropertiesChanged(&TypedEventHandler::<
+                                        GlobalSystemMediaTransportControlsSession,
+                                        TimelinePropertiesChangedEventArgs,
+                                    >::new(
+                                        move |_, _| {
+                                            n3.notify_one();
+                                            Ok(())
+                                        },
+                                    ))
+                                    .unwrap_or_default();
+
+                                bound.push((sess, pb, mp, tl));
+                            }
+                        }
+                    }
+                    notify.notify_one();
+                }
+            })
+            .ok();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = notify;
 }
 
 #[cfg(test)]

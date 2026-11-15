@@ -277,15 +277,16 @@ fn clean_title_from_exe(exe: &str, window_title: &str) -> String {
         .to_string()
 }
 
-struct ForegroundInfo {
-    pid: u32,
-    exe_name: String,
-    window_title: String,
-    fullscreen: bool,
+#[derive(Debug, Clone)]
+pub struct ForegroundInfo {
+    pub pid: u32,
+    pub exe_name: String,
+    pub window_title: String,
+    pub fullscreen: bool,
 }
 
 #[cfg(target_os = "windows")]
-fn query_foreground_window_process() -> Option<ForegroundInfo> {
+pub fn query_foreground_window_process() -> Option<ForegroundInfo> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, MAX_PATH, RECT};
     use windows::Win32::Graphics::Gdi::{
@@ -348,10 +349,16 @@ fn query_foreground_window_process() -> Option<ForegroundInfo> {
                 ..Default::default()
             };
             if GetMonitorInfoW(hmon, &mut mi).as_bool() {
-                fullscreen = win_rect.left <= mi.rcMonitor.left
+                let win_covers = win_rect.left <= mi.rcMonitor.left
                     && win_rect.top <= mi.rcMonitor.top
                     && win_rect.right >= mi.rcMonitor.right
                     && win_rect.bottom >= mi.rcMonitor.bottom;
+                let shell_fullscreen = !matches!(
+                    exe_name.to_ascii_lowercase().as_str(),
+                    "explorer.exe" | "shellexperiencehost.exe" | "searchhost.exe" | "pillvyn.exe"
+                )
+                    && crate::services::win_hooks::is_fullscreen_notification_state();
+                fullscreen = win_covers || shell_fullscreen;
             }
         }
 
@@ -365,34 +372,33 @@ fn query_foreground_window_process() -> Option<ForegroundInfo> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn query_foreground_window_process() -> Option<ForegroundInfo> {
+pub fn query_foreground_window_process() -> Option<ForegroundInfo> {
     None
 }
 
 #[cfg(target_os = "windows")]
 fn query_steam_running_app_id() -> Option<u32> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let out = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Software\Valve\Steam", "/v", "RunningAppID"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+
+    let mut value = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Valve\\Steam"),
+            w!("RunningAppID"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    if status.is_ok() && value > 0 {
+        Some(value)
+    } else {
+        None
     }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    for line in stdout.lines() {
-        if line.contains("RunningAppID") {
-            if let Some(hex) = line.split_whitespace().last() {
-                if let Some(stripped) = hex.strip_prefix("0x") {
-                    let id = u32::from_str_radix(stripped, 16).ok()?;
-                    return (id > 0).then_some(id);
-                }
-            }
-        }
-    }
-    None
 }
 
 #[cfg(not(target_os = "windows"))]

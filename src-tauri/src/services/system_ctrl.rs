@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::sync::Notify;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioDeviceInfo {
@@ -364,17 +367,25 @@ pub fn set_brightness_percent(percent: u32) -> Result<(), String> {
     use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
 
     let clamped = percent.min(100);
-    // Try WMI internal panel brightness first (laptops)
-    let wmi_script = format!(
-        "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | Select-Object -First 1) | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=1; Brightness={clamped}}}"
-    );
-    if let Ok(out) = hidden_powershell(&wmi_script) {
-        if out.status.success() && query_wmi_brightness().is_some() {
-            return Ok(());
+    let skip_wmi = SLOW_SYS_CACHE
+        .lock()
+        .ok()
+        .is_some_and(|c| c.wmi_retry_after.is_some_and(|t| Instant::now() < t));
+
+    // Try WMI internal panel brightness first on laptops unless recently known unsupported
+    if !skip_wmi {
+        let wmi_script = format!(
+            "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | Select-Object -First 1) | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=1; Brightness={clamped}}}"
+        );
+        if let Ok(out) = hidden_powershell(&wmi_script) {
+            if out.status.success() && out.stdout.len() > 2 {
+                cache_brightness_value(Some(clamped));
+                return Ok(());
+            }
         }
     }
 
-    // Fallback to DDC/CI physical monitor brightness
+    // Fallback to native DDC/CI physical monitor brightness
     unsafe {
         let hmon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
         let mut count = 0u32;
@@ -398,6 +409,7 @@ pub fn set_brightness_percent(percent: u32) -> Result<(), String> {
                 }
                 let _ = DestroyPhysicalMonitors(&monitors);
                 if ok {
+                    cache_brightness_value(Some(clamped));
                     return Ok(());
                 }
             }
@@ -405,6 +417,104 @@ pub fn set_brightness_percent(percent: u32) -> Result<(), String> {
     }
 
     Err("Display brightness control is unavailable on this monitor (enable DDC/CI or use an internal display)".into())
+}
+
+#[derive(Default)]
+struct SlowSysCache {
+    brightness: Option<u32>,
+    brightness_at: Option<Instant>,
+    wmi_retry_after: Option<Instant>,
+    wifi: (bool, Option<String>),
+    wifi_at: Option<Instant>,
+}
+
+static SLOW_SYS_CACHE: Mutex<SlowSysCache> = Mutex::new(SlowSysCache {
+    brightness: None,
+    brightness_at: None,
+    wmi_retry_after: None,
+    wifi: (false, None),
+    wifi_at: None,
+});
+
+#[cfg(target_os = "windows")]
+fn cache_brightness_value(val: Option<u32>) {
+    if let Ok(mut cache) = SLOW_SYS_CACHE.lock() {
+        cache.brightness = val;
+        cache.brightness_at = Some(Instant::now());
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cached_query_brightness(force_refresh: bool) -> Option<u32> {
+    let now = Instant::now();
+    if let Ok(cache) = SLOW_SYS_CACHE.lock() {
+        if let Some(at) = cache.brightness_at {
+            let ttl = if force_refresh {
+                Duration::from_secs(12)
+            } else {
+                Duration::from_secs(20)
+            };
+            if now.duration_since(at) < ttl {
+                return cache.brightness;
+            }
+        }
+    }
+
+    // Native DDC/CI has zero process-spawn overhead, check it first if WMI previously returned None.
+    let wmi_blocked = SLOW_SYS_CACHE
+        .lock()
+        .ok()
+        .is_some_and(|c| c.wmi_retry_after.is_some_and(|t| now < t));
+
+    let val = if wmi_blocked {
+        query_ddc_brightness()
+    } else if let Some(wmi) = query_wmi_brightness() {
+        Some(wmi)
+    } else {
+        if let Ok(mut cache) = SLOW_SYS_CACHE.lock() {
+            cache.wmi_retry_after = Some(Instant::now() + Duration::from_secs(120));
+        }
+        query_ddc_brightness()
+    };
+
+    if let Ok(mut cache) = SLOW_SYS_CACHE.lock() {
+        cache.brightness = val;
+        cache.brightness_at = Some(Instant::now());
+    }
+    val
+}
+
+#[cfg(target_os = "windows")]
+fn cached_query_wifi(force_refresh: bool) -> (bool, Option<String>) {
+    let now = Instant::now();
+    if let Ok(cache) = SLOW_SYS_CACHE.lock() {
+        if let Some(at) = cache.wifi_at {
+            let ttl = if force_refresh {
+                Duration::from_secs(15)
+            } else {
+                Duration::from_secs(30)
+            };
+            if now.duration_since(at) < ttl {
+                return cache.wifi.clone();
+            }
+        }
+    }
+    if !force_refresh
+        && SLOW_SYS_CACHE
+            .lock()
+            .ok()
+            .is_some_and(|c| c.wifi_at.is_some())
+    {
+        if let Ok(cache) = SLOW_SYS_CACHE.lock() {
+            return cache.wifi.clone();
+        }
+    }
+    let res = query_wifi_status();
+    if let Ok(mut cache) = SLOW_SYS_CACHE.lock() {
+        cache.wifi = res.clone();
+        cache.wifi_at = Some(Instant::now());
+    }
+    res
 }
 
 #[cfg(target_os = "windows")]
@@ -477,9 +587,11 @@ pub fn query_system_snapshot(
     };
 
     let brightness = if include_slow_queries || cached_brightness.is_none() {
-        let val = query_wmi_brightness().or_else(query_ddc_brightness);
+        let val = cached_query_brightness(include_slow_queries);
         *cached_brightness = Some(val);
         val
+    } else if let Ok(c) = SLOW_SYS_CACHE.lock() {
+        c.brightness.or_else(|| cached_brightness.unwrap_or(None))
     } else {
         cached_brightness.unwrap_or(None)
     };
@@ -487,11 +599,7 @@ pub fn query_system_snapshot(
     let output_devices = list_audio_devices(eRender, "output");
     let input_devices = list_audio_devices(eCapture, "input");
     let battery = query_battery();
-    let (wifi_connected, wifi_ssid) = if include_slow_queries {
-        query_wifi_status()
-    } else {
-        (false, None)
-    };
+    let (wifi_connected, wifi_ssid) = cached_query_wifi(include_slow_queries);
 
     SystemControlsSnapshot {
         output_volume,
@@ -557,4 +665,150 @@ pub fn set_default_audio_device(_device_id: &str) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn set_brightness_percent(_percent: u32) -> Result<(), String> {
     Err("Brightness controls require Windows".into())
+}
+
+/// Spawns an event-driven WASAPI listener thread using `IAudioEndpointVolumeCallback` and
+/// `IMMNotificationClient` so volume changes, mute toggles, and default device switches
+/// wake `notify` immediately with zero polling.
+pub fn spawn_audio_event_listener(notify: Arc<Notify>) {
+    #[cfg(target_os = "windows")]
+    {
+        std::thread::Builder::new()
+            .name("pillvyn-wasapi-events".into())
+            .spawn(move || unsafe {
+                use std::sync::mpsc;
+                use windows::core::{implement, PCWSTR};
+                use windows::Win32::Media::Audio::Endpoints::{
+                    IAudioEndpointVolume, IAudioEndpointVolumeCallback,
+                    IAudioEndpointVolumeCallback_Impl,
+                };
+                use windows::Win32::Media::Audio::{
+                    eCapture, eConsole, eMultimedia, eRender, EDataFlow, ERole,
+                    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
+                    MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
+                };
+                use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+                use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
+
+                #[implement(IAudioEndpointVolumeCallback)]
+                struct VolumeCb {
+                    notify: Arc<Notify>,
+                }
+
+                impl IAudioEndpointVolumeCallback_Impl for VolumeCb_Impl {
+                    fn OnNotify(
+                        &self,
+                        _pnotify: *mut AUDIO_VOLUME_NOTIFICATION_DATA,
+                    ) -> windows::core::Result<()> {
+                        self.notify.notify_one();
+                        Ok(())
+                    }
+                }
+
+                #[implement(IMMNotificationClient)]
+                struct DeviceClient {
+                    notify: Arc<Notify>,
+                    rebind_tx: mpsc::Sender<()>,
+                }
+
+                impl IMMNotificationClient_Impl for DeviceClient_Impl {
+                    fn OnDeviceStateChanged(
+                        &self,
+                        _pwstrdeviceid: &PCWSTR,
+                        _dwnewstate: DEVICE_STATE,
+                    ) -> windows::core::Result<()> {
+                        self.notify.notify_one();
+                        let _ = self.rebind_tx.send(());
+                        Ok(())
+                    }
+
+                    fn OnDeviceAdded(&self, _pwstrdeviceid: &PCWSTR) -> windows::core::Result<()> {
+                        self.notify.notify_one();
+                        let _ = self.rebind_tx.send(());
+                        Ok(())
+                    }
+
+                    fn OnDeviceRemoved(
+                        &self,
+                        _pwstrdeviceid: &PCWSTR,
+                    ) -> windows::core::Result<()> {
+                        self.notify.notify_one();
+                        let _ = self.rebind_tx.send(());
+                        Ok(())
+                    }
+
+                    fn OnDefaultDeviceChanged(
+                        &self,
+                        _flow: EDataFlow,
+                        role: ERole,
+                        _pwstrdefaultdeviceid: &PCWSTR,
+                    ) -> windows::core::Result<()> {
+                        if role == eMultimedia || role == eConsole {
+                            self.notify.notify_one();
+                            let _ = self.rebind_tx.send(());
+                        }
+                        Ok(())
+                    }
+
+                    fn OnPropertyValueChanged(
+                        &self,
+                        _pwstrdeviceid: &PCWSTR,
+                        _key: &PROPERTYKEY,
+                    ) -> windows::core::Result<()> {
+                        Ok(())
+                    }
+                }
+
+                let _com = ComGuard::init();
+                let Ok(enumerator): windows::core::Result<IMMDeviceEnumerator> =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                else {
+                    return;
+                };
+
+                let (rebind_tx, rebind_rx) = mpsc::channel::<()>();
+                let client: IMMNotificationClient = DeviceClient {
+                    notify: Arc::clone(&notify),
+                    rebind_tx: rebind_tx.clone(),
+                }
+                .into();
+                let _ = enumerator.RegisterEndpointNotificationCallback(&client);
+
+                let bind_flow = |flow: EDataFlow| -> Option<(
+                    IAudioEndpointVolume,
+                    IAudioEndpointVolumeCallback,
+                )> {
+                    let dev = enumerator.GetDefaultAudioEndpoint(flow, eMultimedia).ok()?;
+                    let vol: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
+                    let cb: IAudioEndpointVolumeCallback = VolumeCb {
+                        notify: Arc::clone(&notify),
+                    }
+                    .into();
+                    vol.RegisterControlChangeNotify(&cb).ok()?;
+                    Some((vol, cb))
+                };
+
+                let mut bound_out = bind_flow(eRender);
+                let mut bound_in = bind_flow(eCapture);
+
+                while rebind_rx.recv().is_ok() {
+                    while rebind_rx.try_recv().is_ok() {}
+                    if let Some((vol, cb)) = bound_out.take() {
+                        let _ = vol.UnregisterControlChangeNotify(&cb);
+                    }
+                    if let Some((vol, cb)) = bound_in.take() {
+                        let _ = vol.UnregisterControlChangeNotify(&cb);
+                    }
+                    bound_out = bind_flow(eRender);
+                    bound_in = bind_flow(eCapture);
+                    notify.notify_one();
+                }
+
+                let _ = enumerator.UnregisterEndpointNotificationCallback(&client);
+            })
+            .ok();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = notify;
 }

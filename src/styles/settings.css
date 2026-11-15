@@ -1,6 +1,6 @@
 html,
 body {
-  background: #0a0d15;
+  background: #08090c;
   overflow: hidden;
 }
 
@@ -9,8 +9,8 @@ body {
   grid-template-columns: 224px 1fr;
   height: 100vh;
   background:
-    radial-gradient(60% 60% at 85% 0%, var(--accent-soft) 0%, transparent 65%),
-    linear-gradient(180deg, #0c101b 0%, #090c14 100%);
+    radial-gradient(50% 45% at 88% 0%, rgba(255, 255, 255, 0.04) 0%, transparent 65%),
+    linear-gradient(180deg, #090b0f 0%, #07080b 100%);
 }
 
 .settings-sidebar {
@@ -19,7 +19,7 @@ body {
   justify-content: space-between;
   padding: 18px 14px;
   border-right: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.018);
 }
 
 .sidebar-brand {
@@ -113,12 +113,23 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.settings-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
 }
 
 .setting-section {
   padding: 16px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.032);
+  background: rgba(255, 255, 255, 0.026);
   border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;

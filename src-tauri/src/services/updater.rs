@@ -109,11 +109,11 @@ mod tests {
 
     #[test]
     fn semver_comparison_works() {
-        assert!(is_newer_semver("1.0.1", "1.0.0"));
-        assert!(is_newer_semver("1.1.0", "1.0.9"));
-        assert!(!is_newer_semver("1.0.0", "1.0.0"));
-        assert!(!is_newer_semver("0.9.9", "1.0.0"));
-        assert!(is_valid_repo_slug("pillvyn/pillvyn"));
+        assert!(is_newer_semver("1.1.0", "1.0.0"));
+        assert!(is_newer_semver("1.1.1", "1.1.0"));
+        assert!(!is_newer_semver("1.1.0", "1.1.0"));
+        assert!(!is_newer_semver("1.0.0", "1.1.0"));
+        assert!(is_valid_repo_slug("EbramJames/PILLVYN"));
         assert!(!is_valid_repo_slug("https://evil.com/x"));
     }
 }

@@ -1,4 +1,4 @@
-use crate::config::{save_config, PillvynConfig, QuickActionItem};
+use crate::config::{save_config, AppProfile, PillvynConfig, QuickActionItem};
 use crate::island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
 use crate::island::{
     apply_window_geometry, list_monitors, HitboxRect, IslandWindowState, MonitorInfo,
@@ -9,7 +9,7 @@ use crate::services::clipboard::{ClipboardSnapshot, ClipboardStore};
 use crate::services::downloads::DownloadsSnapshot;
 use crate::services::gaming::GamingSnapshot;
 use crate::services::hardware::HardwareSnapshot;
-use crate::services::media::{control_media, MediaSnapshot};
+use crate::services::media::{control_media_for_source, MediaSnapshot};
 use crate::services::network::NetworkSnapshot;
 use crate::services::notifications::{
     NotificationHub, NotificationPriority, NotificationsSnapshot,
@@ -27,6 +27,7 @@ use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
+use tokio::sync::Notify;
 
 pub struct AppState {
     pub config: Mutex<PillvynConfig>,
@@ -43,6 +44,13 @@ pub struct AppState {
     pub latest_network: Mutex<Option<NetworkSnapshot>>,
     pub island_expanded: Mutex<bool>,
     pub active_tab: Mutex<String>,
+    pub active_profile: Mutex<Option<AppProfile>>,
+    pub island_pinned: Mutex<bool>,
+    pub last_expanded_ms: Mutex<u64>,
+    pub last_local_audio_action_ms: Mutex<u64>,
+    pub media_notify: Arc<Notify>,
+    pub system_notify: Arc<Notify>,
+    pub foreground_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +71,8 @@ pub struct InitialDashboardPayload {
     pub stopwatch_running: bool,
     pub weather: WeatherSnapshot,
     pub plugins: PluginsSnapshot,
+    pub active_profile: Option<AppProfile>,
+    pub island_pinned: bool,
     pub app_version: String,
 }
 
@@ -129,6 +139,8 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
         })
         .unwrap_or_else(|_| (Vec::new(), 0, false, WeatherSnapshot::default()));
     let plugins = discover_plugins();
+    let active_profile = state.active_profile.lock().ok().and_then(|g| g.clone());
+    let island_pinned = state.island_pinned.lock().map(|g| *g).unwrap_or(false);
 
     InitialDashboardPayload {
         config,
@@ -147,6 +159,8 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
         stopwatch_running,
         weather,
         plugins,
+        active_profile,
+        island_pinned,
         app_version: app.package_info().version.to_string(),
     }
 }
@@ -171,14 +185,36 @@ pub fn update_island_hitbox(
             height: hitbox.height.clamp(16.0, 500.0),
         };
     }
+    let mut became_expanded = false;
     if let Ok(mut exp) = state.island_expanded.lock() {
+        if expanded && !*exp {
+            became_expanded = true;
+        }
         *exp = expanded;
+        if !expanded {
+            if let Ok(mut pinned) = state.island_pinned.lock() {
+                *pinned = false;
+            }
+        }
+    }
+    if became_expanded {
+        if let Ok(mut ts) = state.last_expanded_ms.lock() {
+            *ts = now_ms();
+        }
     }
     if let Some(tab) = active_tab {
         if let Ok(mut t) = state.active_tab.lock() {
             *t = tab;
         }
     }
+}
+
+#[tauri::command]
+pub fn set_island_pinned(app: AppHandle, state: State<'_, AppState>, pinned: bool) {
+    if let Ok(mut p) = state.island_pinned.lock() {
+        *p = pinned;
+    }
+    let _ = app.emit("pillvyn://pinned", pinned);
 }
 
 #[tauri::command]
@@ -213,6 +249,8 @@ pub fn save_app_config(
     }
 
     let _ = crate::register_configured_hotkeys(&app, &new_config);
+    state.foreground_notify.notify_one();
+    state.system_notify.notify_one();
     let _ = app.emit("pillvyn://config", new_config.clone());
     Ok(new_config)
 }
@@ -265,8 +303,15 @@ fn apply_dark_titlebar(window: &tauri::WebviewWindow) {
 }
 
 #[tauri::command]
-pub fn media_control(action: String, seek_sec: Option<f64>) -> Result<(), String> {
-    control_media(&action, seek_sec)
+pub fn media_control(
+    state: State<'_, AppState>,
+    action: String,
+    seek_sec: Option<f64>,
+    source_id: Option<String>,
+) -> Result<(), String> {
+    control_media_for_source(&action, seek_sec, source_id.as_deref())?;
+    state.media_notify.notify_one();
+    Ok(())
 }
 
 #[tauri::command]
@@ -276,7 +321,11 @@ pub fn set_volume(
     is_input: bool,
     level: f32,
 ) -> Result<(), String> {
+    if let Ok(mut ts) = state.last_local_audio_action_ms.lock() {
+        *ts = now_ms();
+    }
     set_endpoint_volume(is_input, level)?;
+    state.system_notify.notify_one();
     let pct = (level.clamp(0.0, 1.0) * 100.0).round() as u32;
     push_transient_hud(
         &app,
@@ -289,16 +338,26 @@ pub fn set_volume(
 }
 
 #[tauri::command]
-pub fn set_mute(is_input: bool, muted: bool) -> Result<(), String> {
-    set_endpoint_mute(is_input, muted)
+pub fn set_mute(state: State<'_, AppState>, is_input: bool, muted: bool) -> Result<(), String> {
+    if let Ok(mut ts) = state.last_local_audio_action_ms.lock() {
+        *ts = now_ms();
+    }
+    set_endpoint_mute(is_input, muted)?;
+    state.system_notify.notify_one();
+    Ok(())
 }
 
 #[tauri::command]
-pub fn switch_audio_device(device_id: String) -> Result<(), String> {
+pub fn switch_audio_device(state: State<'_, AppState>, device_id: String) -> Result<(), String> {
     if device_id.trim().is_empty() {
         return Err("Invalid audio device id".into());
     }
-    set_default_audio_device(&device_id)
+    if let Ok(mut ts) = state.last_local_audio_action_ms.lock() {
+        *ts = now_ms();
+    }
+    set_default_audio_device(&device_id)?;
+    state.system_notify.notify_one();
+    Ok(())
 }
 
 #[tauri::command]
@@ -669,7 +728,7 @@ pub async fn check_updates(
                 g.privacy.update_repo.clone(),
             )
         })
-        .unwrap_or((false, "pillvyn/pillvyn".into()));
+        .unwrap_or((false, "EbramJames/PILLVYN".into()));
     let ver = app.package_info().version.to_string();
     check_for_updates(&ver, &repo, consent).await
 }

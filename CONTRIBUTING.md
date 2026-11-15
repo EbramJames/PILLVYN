@@ -4,7 +4,7 @@ Thank you for helping make **PILLVYN** the cleanest, fastest Dynamic Island expe
 
 ## Engineering Principles
 1. **Zero fake data or stubbed controls**: Every control, indicator, and sensor must connect to real Windows APIs or gracefully indicate unavailability.
-2. **Low idle footprint**: Prefer event-driven Win32/WinRT hooks (`AddClipboardFormatListener`, GSMTC events) over high-frequency polling.
+2. **Low idle footprint**: Prefer event-driven Win32/WinRT hooks (`AddClipboardFormatListener`, `SetWinEventHook`, WASAPI audio callbacks, and GSMTC session listeners) over high-frequency polling.
 3. **Strict security boundaries**: Keep Tauri capabilities minimal, validate all IPC inputs in Rust, never embed secrets, and avoid `innerHTML` with untrusted content.
 4. **Clean, modular structure**:
    - `src/`: Vanilla JS, HTML5, CSS3 frontend
@@ -32,7 +32,7 @@ Drop a folder inside `%APPDATA%\pillvyn\PILLVYN\config\plugins\<your-plugin>\` c
 {
   "id": "my-plugin",
   "name": "My Utility",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "You",
   "description": "Triggers a custom Live Activity card.",
   "enabled": true,

@@ -29,9 +29,9 @@ export function renderSystem(store, api) {
     ? (batt.ac_online ? 'Desktop / AC Power' : 'No battery detected')
     : `${batt.percent ?? '--'}% · ${batt.charging ? 'Charging' : (batt.ac_online ? 'Plugged in' : 'Discharging')}${batt.remaining_seconds ? ` · ${formatDuration(batt.remaining_seconds)} left` : ''}`;
 
-  const outBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${outPct}%, rgba(255, 255, 255, 0.12) ${outPct}%)`;
-  const micBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${micPct}%, rgba(255, 255, 255, 0.12) ${micPct}%)`;
-  const brightBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${brightPct}%, rgba(255, 255, 255, 0.12) ${brightPct}%)`;
+  const outBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${outPct}%, rgba(255, 255, 255, 0.14) ${outPct}%)`;
+  const micBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${micPct}%, rgba(255, 255, 255, 0.14) ${micPct}%)`;
+  const brightBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${brightPct}%, rgba(255, 255, 255, 0.14) ${brightPct}%)`;
 
   return el('div', { class: 'stack' }, [
     el('div', { class: 'grid-2' }, [
@@ -53,7 +53,7 @@ export function renderSystem(store, api) {
           style: { background: outBg },
           onInput: (e) => {
             const v = Number(e.target.value);
-            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${v}%, rgba(255, 255, 255, 0.12) ${v}%)`;
+            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
             api.setVolume(false, v / 100);
           },
         }),
@@ -78,7 +78,7 @@ export function renderSystem(store, api) {
           style: { background: micBg },
           onInput: (e) => {
             const v = Number(e.target.value);
-            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${v}%, rgba(255, 255, 255, 0.12) ${v}%)`;
+            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
             api.setVolume(true, v / 100);
           },
         }),
@@ -100,11 +100,11 @@ export function renderSystem(store, api) {
             style: { background: brightBg },
             onInput: (e) => {
               const v = Number(e.target.value);
-              e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${v}%, rgba(255, 255, 255, 0.12) ${v}%)`;
+              e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
             },
             onChange: (e) => api.setBrightness(Number(e.target.value)),
           })
-        : el('div', { class: 'muted', text: 'Monitor does not expose WMI internal brightness or DDC/CI.' }),
+        : el('div', { class: 'muted', text: 'No DDC/CI or internal backlight exposed by display' }),
     ]),
 
     el('div', { class: 'grid-2' }, [

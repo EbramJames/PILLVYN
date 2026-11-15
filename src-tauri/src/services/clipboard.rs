@@ -362,6 +362,6 @@ mod tests {
     fn sensitive_filter_catches_tokens() {
         assert!(looks_sensitive("ghp_1234567890abcdef"));
         assert!(looks_sensitive("-----BEGIN OPENSSH PRIVATE KEY-----"));
-        assert!(!looks_sensitive("https://github.com/pillvyn/pillvyn"));
+        assert!(!looks_sensitive("https://github.com/EbramJames/PILLVYN"));
     }
 }

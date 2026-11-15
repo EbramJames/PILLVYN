@@ -33,6 +33,10 @@ pub struct AppearanceConfig {
     pub monitor_name: Option<String>,
     pub reduced_motion: bool,
     pub hover_expand: bool,
+    pub hover_peek: bool,
+    pub minimal_idle: bool,
+    pub click_outside_dismiss: bool,
+    pub show_volume_hud: bool,
     pub auto_collapse_ms: u64,
 }
 
@@ -143,6 +147,10 @@ impl Default for AppearanceConfig {
             monitor_name: None,
             reduced_motion: false,
             hover_expand: false,
+            hover_peek: true,
+            minimal_idle: true,
+            click_outside_dismiss: true,
+            show_volume_hud: true,
             auto_collapse_ms: 0,
         }
     }
@@ -187,7 +195,7 @@ impl Default for PrivacyConfig {
             dnd_mode: false,
             focus_mode: false,
             update_check_consent: false,
-            update_repo: "pillvyn/pillvyn".to_string(),
+            update_repo: "EbramJames/PILLVYN".to_string(),
         }
     }
 }
@@ -240,7 +248,7 @@ impl Default for AiConfig {
 impl Default for PillvynConfig {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             appearance: AppearanceConfig::default(),
             modules: ModulesConfig::default(),
             hotkeys: HotkeysConfig::default(),
@@ -350,9 +358,18 @@ impl PillvynConfig {
             self.appearance.auto_collapse_ms = self.appearance.auto_collapse_ms.clamp(2000, 30000);
         }
 
+        if self.version < 2 {
+            self.version = 2;
+        }
         self.privacy.clipboard_max_items = self.privacy.clipboard_max_items.clamp(5, 100);
-        if self.privacy.update_repo.trim().is_empty() {
-            self.privacy.update_repo = "pillvyn/pillvyn".to_string();
+        if self.privacy.update_repo.trim().is_empty()
+            || self
+                .privacy
+                .update_repo
+                .trim()
+                .eq_ignore_ascii_case("pillvyn/pillvyn")
+        {
+            self.privacy.update_repo = "EbramJames/PILLVYN".to_string();
         }
 
         if self.widgets.temperature_unit != "C" && self.widgets.temperature_unit != "F" {
@@ -400,11 +417,24 @@ pub fn config_file_path() -> PathBuf {
 
 pub fn load_config() -> PillvynConfig {
     let path = config_file_path();
-    let mut cfg = match fs::read_to_string(&path) {
-        Ok(raw) => serde_json::from_str::<PillvynConfig>(&raw).unwrap_or_default(),
-        Err(_) => PillvynConfig::default(),
+    let (mut cfg, loaded_from_disk) = match fs::read_to_string(&path) {
+        Ok(raw) => match serde_json::from_str::<PillvynConfig>(&raw) {
+            Ok(parsed) => (parsed, true),
+            Err(_) => (PillvynConfig::default(), false),
+        },
+        Err(_) => (PillvynConfig::default(), false),
     };
+    let needs_migration = loaded_from_disk
+        && (cfg.version < 2
+            || cfg
+                .privacy
+                .update_repo
+                .trim()
+                .eq_ignore_ascii_case("pillvyn/pillvyn"));
     cfg.sanitize();
+    if needs_migration {
+        let _ = save_config(&cfg);
+    }
     cfg
 }
 
@@ -450,5 +480,22 @@ mod tests {
         assert!(!is_valid_hex_color("5b8cff"));
         assert!(!is_valid_hex_color("#zzz"));
         assert!(!is_valid_hex_color("#1234567"));
+    }
+
+    #[test]
+    fn migrates_v1_repo_and_defaults_new_appearance_flags() {
+        let legacy = r#"{
+            "version": 1,
+            "appearance": { "theme": "obsidian" },
+            "privacy": { "update_repo": "pillvyn/pillvyn" }
+        }"#;
+        let mut cfg: PillvynConfig = serde_json::from_str(legacy).expect("valid legacy json");
+        cfg.sanitize();
+        assert_eq!(cfg.version, 2);
+        assert_eq!(cfg.privacy.update_repo, "EbramJames/PILLVYN");
+        assert!(cfg.appearance.minimal_idle);
+        assert!(cfg.appearance.hover_peek);
+        assert!(cfg.appearance.click_outside_dismiss);
+        assert!(cfg.appearance.show_volume_hud);
     }
 }

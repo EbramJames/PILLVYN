@@ -1,15 +1,16 @@
 <p align="center">
-  <img src="docs/icon.png" alt="PILLVYN Logo" width="112" height="112" />
+  <img src="docs/branding/pillvyn-logo.png" alt="PILLVYN Logo" width="118" height="118" />
 </p>
 
 <h1 align="center">PILLVYN</h1>
 
 <p align="center">
-  <strong>Premium, lightweight Dynamic Island desktop hub for Windows 10 and Windows 11.</strong><br/>
+  <strong>Minimal, responsive Dynamic Island desktop hub for Windows 10 and Windows 11.</strong><br/>
   Built with Rust, Tauri 2, HTML5, CSS3, and Vanilla JavaScript — packaged with NSIS.
 </p>
 
 <p align="center">
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.1.0" src="https://img.shields.io/badge/Version-v1.1.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -19,7 +20,7 @@
 
 ## Overview
 
-**PILLVYN** places a sleek, dark-glassmorphic Dynamic Island capsule at the top-center of your Windows monitor. It stays completely click-through outside the pill bounds so your workflow underneath is never obstructed, and smoothly morphs between **Minimized**, **Compact**, and **Expanded** states when you interact or receive Live Activities.
+**PILLVYN** places a quiet, dark-glassmorphic Dynamic Island capsule at the top-center of your Windows monitor. It stays click-through outside the capsule bounds so windows underneath remain completely unobstructed, never steals focus unnecessarily, and morphs smoothly between **Minimized**, **Compact**, and **Expanded** states using natural spring physics and intuitive gestures.
 
 ## Screenshots
 
@@ -27,33 +28,40 @@
   <img src="docs/screenshots/compact-view.png" alt="PILLVYN Compact Dynamic Island Pill on Windows 11" width="520" />
 </p>
 
-| Expanded Home Dashboard | Live Hardware &amp; NVML GPU Telemetry |
+| Expanded Hub | Monitor (`Hardware / Net / Downloads / Gaming`) |
 | :---: | :---: |
-| <img src="docs/screenshots/expanded-home.png" alt="PILLVYN Expanded Home Hub" width="420" /> | <img src="docs/screenshots/expanded-stats.png" alt="PILLVYN Hardware Monitor" width="420" /> |
+| <img src="docs/screenshots/expanded-home.png" alt="PILLVYN Expanded Hub" width="420" /> | <img src="docs/screenshots/expanded-stats.png" alt="PILLVYN Monitor Telemetry" width="420" /> |
 
-| Clock, Stopwatch, Timers &amp; Weather | Dedicated Settings Studio |
+| Tools (`Timers / Shortcuts / Plugins / AI`) | Settings Studio |
 | :---: | :---: |
-| <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Widgets Panel" width="420" /> | <img src="docs/screenshots/settings-studio.png" alt="PILLVYN Settings Studio" width="460" /> |
+| <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> | <img src="docs/screenshots/settings-studio.png" alt="PILLVYN Settings Studio" width="460" /> |
 
-## Features
+## Features & v1.1.0 Highlights
 
-- **Dynamic Island Core**: Frameless transparent glass capsule with spring animations, Minimized/Compact/Expanded modes, multi-monitor selection, mixed-DPI scaling support, and smart cursor hit-testing click-through.
-- **Multiple Simultaneous Live Activities**: Priority-sorted live strip combining Media, Downloads, Timers, Gaming, Notifications, System HUD changes, and Plugin cards.
-- **Music Player (Windows GSMTC)**: Detects active Windows media sessions (Spotify, Chrome, Edge, Firefox, VLC, Apple Music), extracts album artwork, shows seekable timeline, and provides transport controls.
-- **System Controls**: WASAPI CoreAudio master & microphone volume/mute, default output/input audio device switching (`IPolicyConfig`), display brightness (WMI internal panels & DDC/CI external monitors where supported), battery/power telemetry, and Windows connectivity quick links.
-- **Hardware Monitor**: Live CPU, RAM, and disk volume usage via `sysinfo`, DXGI GPU adapter discovery, Windows PDH 3D GPU load, and NVIDIA NVML temperatures/VRAM/power where supported.
-- **Gaming Mode (Anti-Cheat Safe)**: Detects Steam `RunningAppID`, known game executables, custom game processes, and fullscreen apps; automatically suppresses non-critical alerts, supports Click-Through HUD mode, and surfaces running ecosystem apps (Steam, Discord, OBS, Spotify, VLC, Browsers) without DLL injection.
-- **Download Monitor**: Real-time tracking of active Chromium/Firefox/Opera partial downloads (`.crdownload`, `.part`, `.opdownload`) and Steam `appmanifest_*.acf` downloads with speed and ETA.
-- **Clipboard Manager**: Zero-polling Win32 `AddClipboardFormatListener` capture for text and image previews, search filter, pin/delete/clear, and sensitive token filtering.
-- **Network Monitor**: Real adapter Rx/Tx throughput (`GetIfTable2`), periodic ICMP ping latency, and active VPN adapter detection (WireGuard, WireSock, OpenVPN, Tailscale, Wintun, etc.).
-- **Quick Actions & Widgets**: Validated Windows system tools & URL shortcuts, clock, preset/custom countdown timers, stopwatch, and Open-Meteo weather with offline cache.
-- **Plugins & Optional AI**: Local `plugin.json` manifest loader (`%APPDATA%\pillvyn\PILLVYN\config\plugins`), automatic application profiles, global shortcuts, Windows autostart, system tray, and strictly opt-in local Ollama / OpenAI-compatible AI assistant.
+- **Quiet Obsidian Glass UI & Dynamic Island Core**:
+  - Frameless, layered obsidian glass with uniform monochrome SVG icons and clean typography.
+  - Streamlined **7-tab Expanded Dock** (`Hub`, `Media`, `Controls`, `Monitor`, `Alerts`, `Clip`, `Tools`) with segmented sub-views so the pill stays calm and uncluttered.
+  - **Intuitive Gestures & Controls**:
+    - Hover the Compact pill to reveal inline playback controls (**Hover-to-Peek**).
+    - Scroll the mouse wheel over Compact to adjust master volume (`Shift+Wheel` for brightness where supported).
+    - Swipe horizontally on Compact to skip tracks or cycle Live Activities; swipe down to Expand, swipe up to Minimize.
+    - Swipe left/right inside Expanded to move across tabs; swipe up to Collapse.
+    - Click anywhere outside Expanded to auto-dismiss cleanly — or click the header **Pin** button to lock the hub open while working.
+    - Keyboard shortcuts inside Expanded: `Escape` to collapse, `ArrowLeft`/`ArrowRight` to switch tabs, `Space` for play/pause.
+- **Event-Driven Synchronization & Multiple Live Activities**:
+  - **WinRT GSMTC Listeners**: Event-driven track/timeline updates across multiple simultaneous media sessions with instant source switching (Spotify, Chrome, Edge, Firefox, Opera, Yandex Browser, VLC, Apple Music, Amazon Music, MusicBee, Winamp, mpv, Kodi).
+  - **WASAPI CoreAudio Callbacks**: `IAudioEndpointVolumeCallback` + `IMMNotificationClient` wake PILLVYN immediately when hardware volume keys, mute buttons, or default audio devices change, briefly flashing the system HUD without polling spam.
+  - **Win32 Foreground & Fullscreen Sync**: `SetWinEventHook` + `SHQueryUserNotificationState` apply per-app profiles automatically without stealing focus or spawning child CLI processes.
+- **System Controls & Hardware Monitor**: Master/mic gain & mute, default device switching (`IPolicyConfig`), cached WMI/DDC-CI display brightness where exposed by the monitor, CPU/RAM/Disk (`sysinfo`), DXGI/PDH GPU load, and NVIDIA NVML temperatures/VRAM/wattage where supported.
+- **Anti-Cheat Safe Gaming, Downloads, Clipboard & Network**: Native registry Steam `RunningAppID` & process detection without DLL injection, `.crdownload`/`.part`/`.opdownload`/Steam `.acf` download ETA, `AddClipboardFormatListener` history with secret filtering, `GetIfTable2` throughput, ICMP latency, and VPN detection.
+- **Tools, Plugins, Optional AI & Settings Studio**: Quick shortcuts, countdown timers, stopwatch, cached Open-Meteo weather, local `plugin.json` manifests (`%APPDATA%\pillvyn\PILLVYN\config\plugins`), strictly opt-in local Ollama/OpenAI-compatible AI, tray menu, Windows autostart, global hotkeys, and consent-gated GitHub Release updates.
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (`PILLVYN_1.0.0_x64-setup.exe`) from **Releases**.
-2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 bootstrap if missing).
-3. Launch **PILLVYN** from the Start Menu or system tray.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.1.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
+3. Verify integrity (optional): compare against `PILLVYN_1.1.0_x64-setup.exe.sha256`.
+4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**
 > - `Alt+Shift+Space`: Expand / Collapse Island
@@ -68,16 +76,16 @@ PILLVYN/
 ├── src/                        # Vanilla JS, HTML5, CSS3 frontend (zero framework overhead)
 │   ├── index.html              # Floating Dynamic Island capsule UI
 │   ├── settings.html           # Dedicated Settings Studio window
-│   ├── styles/                 # Design tokens, island animations, module & settings styles
-│   └── js/                     # Store, safe DOM helpers, core state machine, 12 module renderers
+│   ├── styles/                 # Quiet Obsidian Glass tokens, island animations, module & settings styles
+│   └── js/                     # Store, safe DOM helpers, core gesture/state machine, 12 modular renderers
 ├── src-tauri/
 │   ├── capabilities/           # Restrictive per-window Tauri v2 capability definitions
 │   ├── nsis/                   # NSIS installer hooks & branded wizard bitmaps
 │   └── src/
-│       ├── config.rs           # Validated atomic JSON config persistence
-│       ├── commands.rs         # Validated IPC command layer
-│       ├── island/             # Multi-monitor DPI geometry, click-through hit-testing, Live Activities
-│       └── services/           # Independent Windows Win32/WinRT & OS service integrations
+│       ├── config.rs           # Validated atomic JSON config persistence (v2 schema + auto-migration)
+│       ├── commands.rs         # Validated IPC command layer & asynchronous wakeup handles
+│       ├── island/             # Multi-monitor DPI geometry, click-outside & click-through controller
+│       └── services/           # Event-driven Windows Win32/WinRT, WASAPI & telemetry integrations
 ├── docs/website/               # Static official product website (GitHub Pages ready)
 └── .github/                    # CI/CD workflows, issue templates, PR template
 ```

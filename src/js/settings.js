@@ -15,7 +15,7 @@ const SECTIONS = [
 
 let config = null;
 let monitors = [];
-let appVersion = '1.0.0';
+let appVersion = '1.1.0';
 let activeSection = 'appearance';
 let dirty = false;
 let updateStatus = null;
@@ -206,7 +206,11 @@ function renderSection() {
             },
           }),
         ]),
+        row('Minimal Idle Capsule', 'Keep the resting capsule clean and unobtrusive until hovering or playing.', toggleSwitch(config.appearance.minimal_idle !== false, (v) => { config.appearance.minimal_idle = v; })),
+        row('Hover-to-Peek Controls', 'Reveal inline play, pause, and skip controls when hovering the compact capsule.', toggleSwitch(config.appearance.hover_peek !== false, (v) => { config.appearance.hover_peek = v; })),
         row('Hover to Expand', 'Automatically expand when the pointer rests over the capsule.', toggleSwitch(config.appearance.hover_expand, (v) => { config.appearance.hover_expand = v; })),
+        row('Click Outside to Collapse', 'Dismiss the expanded hub when clicking outside the island unless pinned.', toggleSwitch(config.appearance.click_outside_dismiss !== false, (v) => { config.appearance.click_outside_dismiss = v; })),
+        row('External Audio HUD Flash', 'Briefly surface volume, mute, or output changes triggered by hardware keys.', toggleSwitch(config.appearance.show_volume_hud !== false, (v) => { config.appearance.show_volume_hud = v; })),
         row('Reduced Motion', 'Minimize spring animations for accessibility or low power.', toggleSwitch(config.appearance.reduced_motion, (v) => { config.appearance.reduced_motion = v; })),
       ])
     );
@@ -439,7 +443,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
 document.getElementById('btn-reset-defaults').addEventListener('click', async () => {
   if (!invoke) return;
   try {
-    config = await invoke('save_app_config', { newConfig: { version: 1 } });
+    config = await invoke('save_app_config', { newConfig: { version: 2 } });
     clearDirty();
     showToast('Restored default PILLVYN settings.');
     renderSection();
@@ -453,7 +457,7 @@ async function init() {
   const initData = await invoke('get_initial_state');
   config = initData.config;
   monitors = initData.monitors || [];
-  appVersion = initData.app_version || '1.0.0';
+  appVersion = initData.app_version || '1.1.0';
   document.getElementById('sidebar-version').textContent = `v${appVersion} · Settings Studio`;
 
   if (listen) {

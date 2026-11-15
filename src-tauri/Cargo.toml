@@ -1,10 +1,10 @@
 [package]
 name = "pillvyn"
-version = "1.0.0"
+version = "1.1.0"
 description = "PILLVYN — Premium, lightweight Dynamic Island for Windows 10 and Windows 11"
 authors = ["PILLVYN Contributors"]
 license = "MIT"
-repository = "https://github.com/pillvyn/pillvyn"
+repository = "https://github.com/EbramJames/PILLVYN"
 edition = "2021"
 rust-version = "1.82"
 
@@ -35,7 +35,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
+windows-core = "0.58"
 windows = { version = "0.58", features = [
+  "implement",
   "Foundation",
   "Foundation_Collections",
   "Media_Control",
@@ -59,8 +61,11 @@ windows = { version = "0.58", features = [
   "Win32_System_LibraryLoader",
   "Win32_System_Performance",
   "Win32_System_Power",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_Variant",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_Shell_PropertiesSystem",
   "Win32_UI_WindowsAndMessaging"

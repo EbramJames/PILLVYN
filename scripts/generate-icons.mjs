@@ -5,151 +5,267 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+const sourceLogoPath = path.join(rootDir, 'docs', 'branding', 'pillvyn-logo.png');
 const iconsDir = path.join(rootDir, 'src-tauri', 'icons');
 const nsisDir = path.join(rootDir, 'src-tauri', 'nsis');
+const docsIconPath = path.join(rootDir, 'docs', 'icon.png');
+const webIconPath = path.join(rootDir, 'docs', 'website', 'assets', 'icon.png');
+const srcAssetsDir = path.join(rootDir, 'src', 'assets');
 
-fs.mkdirSync(iconsDir, { recursive: true });
-fs.mkdirSync(nsisDir, { recursive: true });
+for (const dir of [iconsDir, nsisDir, path.dirname(webIconPath), srcAssetsDir]) {
+  fs.mkdirSync(dir, { recursive: true });
+}
 
 function clamp(v, min = 0, max = 1) {
   return v < min ? min : v > max ? max : v;
 }
 
-function smoothstep(edge0, edge1, x) {
-  const t = clamp((x - edge0) / (edge1 - edge0));
-  return t * t * (3 - 2 * t);
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
 }
 
-function mix(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function mixColor(c1, c2, t) {
-  return [
-    mix(c1[0], c2[0], t),
-    mix(c1[1], c2[1], t),
-    mix(c1[2], c2[2], t),
-    mix(c1[3], c2[3], t),
-  ];
-}
-
-function blendOver(dst, src) {
-  const sa = src[3];
-  const da = dst[3];
-  const outA = sa + da * (1 - sa);
-  if (outA <= 1e-6) return [0, 0, 0, 0];
-  return [
-    (src[0] * sa + dst[0] * da * (1 - sa)) / outA,
-    (src[1] * sa + dst[1] * da * (1 - sa)) / outA,
-    (src[2] * sa + dst[2] * da * (1 - sa)) / outA,
-    outA,
-  ];
-}
-
-function sdRoundedBox(px, py, bx, by, r) {
-  const qx = Math.abs(px) - bx + r;
-  const qy = Math.abs(py) - by + r;
-  const ox = Math.max(qx, 0);
-  const oy = Math.max(qy, 0);
-  return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - r;
-}
-
-function sampleIconPixel(u, v) {
-  // Normalized coordinates [-1, 1]
-  const x = u * 2 - 1;
-  const y = v * 2 - 1;
-
-  // Outer rounded squircle badge
-  const dBadge = sdRoundedBox(x, y, 0.90, 0.90, 0.36);
-  const badgeAlpha = 1 - smoothstep(-0.005, 0.005, dBadge);
-  if (badgeAlpha <= 0.001) return [0, 0, 0, 0];
-
-  // Deep obsidian background gradient + subtle top prism glow
-  const radial = clamp(1 - Math.hypot(x, y + 0.35) * 0.72);
-  let col = mixColor([9, 12, 20, 1], [22, 29, 48, 1], radial * 0.75);
-
-  // Subtle ambient aurora behind the pill
-  const glow = Math.exp(-((x * 1.1) ** 2 + ((y + 0.05) * 2.2) ** 2) * 2.8);
-  const aurora = mixColor([68, 125, 255, 0], [45, 224, 198, 1], clamp((x + 0.6) / 1.2));
-  col = blendOver(col, [aurora[0], aurora[1], aurora[2], glow * 0.35]);
-
-  // Crisp subtle inner rim
-  const rim = smoothstep(-0.024, -0.007, dBadge) * (1 - smoothstep(-0.007, 0.003, dBadge));
-  col = blendOver(col, [180, 210, 255, rim * 0.28]);
-
-  // Center floating Dynamic Island capsule
-  const dPill = sdRoundedBox(x, y, 0.64, 0.21, 0.21);
-  const pillAlpha = 1 - smoothstep(-0.004, 0.004, dPill);
-  const pillDropShadow = (1 - smoothstep(-0.01, 0.14, sdRoundedBox(x, y - 0.05, 0.64, 0.21, 0.21))) * 0.55;
-  col = blendOver(col, [0, 0, 0, pillDropShadow]);
-
-  if (pillAlpha > 0.001) {
-    const gradT = clamp((x + 0.64) / 1.28);
-    let pillCol = mixColor([10, 13, 21, 1], [18, 23, 36, 1], clamp((0.21 - y) / 0.42));
-    // Luminous glass border around capsule
-    const pillEdge = smoothstep(-0.022, -0.005, dPill) * (1 - smoothstep(-0.005, 0.004, dPill));
-    const borderTint = mixColor([94, 152, 255, 1], [46, 230, 197, 1], gradT);
-    pillCol = blendOver(pillCol, [borderTint[0], borderTint[1], borderTint[2], pillEdge * 0.9]);
-    col = blendOver(col, [pillCol[0], pillCol[1], pillCol[2], pillAlpha]);
+function decodePNG(filePath) {
+  const buf = fs.readFileSync(filePath);
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (!buf.subarray(0, 8).equals(sig)) {
+    throw new Error(`Invalid PNG signature in ${filePath}`);
   }
 
-  // Left live-activity glowing prism orb inside the capsule
-  const orbDist = Math.hypot(x + 0.39, y) - 0.085;
-  const orbAlpha = 1 - smoothstep(-0.004, 0.004, orbDist);
-  if (orbAlpha > 0.001) {
-    const orbCol = mixColor([88, 138, 255, 1], [46, 230, 197, 1], clamp((x + 0.48) / 0.18));
-    col = blendOver(col, [orbCol[0], orbCol[1], orbCol[2], orbAlpha]);
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idatChunks = [];
+  let offset = 8;
+
+  while (offset < buf.length) {
+    const len = buf.readUInt32BE(offset);
+    const type = buf.subarray(offset + 4, offset + 8).toString('ascii');
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + len;
+    if (type === 'IHDR') {
+      width = buf.readUInt32BE(dataStart);
+      height = buf.readUInt32BE(dataStart + 4);
+      bitDepth = buf[dataStart + 8];
+      colorType = buf[dataStart + 9];
+      const interlace = buf[dataStart + 12];
+      if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6) || interlace !== 0) {
+        throw new Error(`Unsupported PNG format in ${filePath} (depth=${bitDepth}, type=${colorType}, interlace=${interlace})`);
+      }
+    } else if (type === 'IDAT') {
+      idatChunks.push(buf.subarray(dataStart, dataEnd));
+    } else if (type === 'IEND') {
+      break;
+    }
+    offset = dataEnd + 4;
   }
 
-  // Right animated waveform bars inside the capsule
-  const bars = [
-    { cx: 0.14, h: 0.075 },
-    { cx: 0.24, h: 0.115 },
-    { cx: 0.34, h: 0.065 },
-    { cx: 0.44, h: 0.095 },
-  ];
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    const dBar = sdRoundedBox(x - b.cx, y, 0.026, b.h, 0.025);
-    const barAlpha = 1 - smoothstep(-0.004, 0.004, dBar);
-    if (barAlpha > 0.001) {
-      const barTint = mixColor([124, 165, 255, 1], [86, 238, 210, 1], i / 3);
-      col = blendOver(col, [barTint[0], barTint[1], barTint[2], barAlpha * 0.96]);
+  const raw = zlib.inflateSync(Buffer.concat(idatChunks));
+  const bpp = colorType === 6 ? 4 : 3;
+  const stride = width * bpp;
+  const unfilt = Buffer.alloc(height * stride);
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const srcRow = y * (stride + 1) + 1;
+    const dstRow = y * stride;
+    const prevRow = (y - 1) * stride;
+
+    for (let x = 0; x < stride; x++) {
+      const val = raw[srcRow + x];
+      const a = x >= bpp ? unfilt[dstRow + x - bpp] : 0;
+      const b = y > 0 ? unfilt[prevRow + x] : 0;
+      const c = y > 0 && x >= bpp ? unfilt[prevRow + x - bpp] : 0;
+
+      let recon = val;
+      if (filter === 1) recon = (val + a) & 0xff;
+      else if (filter === 2) recon = (val + b) & 0xff;
+      else if (filter === 3) recon = (val + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) recon = (val + paeth(a, b, c)) & 0xff;
+      unfilt[dstRow + x] = recon;
     }
   }
 
-  return [col[0], col[1], col[2], col[3] * badgeAlpha];
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let i = 0, p = 0; i < width * height; i++, p += bpp) {
+    rgba[i * 4] = unfilt[p];
+    rgba[i * 4 + 1] = unfilt[p + 1];
+    rgba[i * 4 + 2] = unfilt[p + 2];
+    rgba[i * 4 + 3] = bpp === 4 ? unfilt[p + 3] : 255;
+  }
+  return { width, height, rgba };
 }
 
-function renderRGBA(size, sampler) {
-  const buf = Buffer.alloc(size * size * 4);
-  const ss = 3; // 3x3 supersampling for smooth anti-aliasing
-  for (let py = 0; py < size; py++) {
-    for (let px = 0; px < size; px++) {
-      let r = 0, g = 0, b = 0, a = 0;
-      for (let sy = 0; sy < ss; sy++) {
-        for (let sx = 0; sx < ss; sx++) {
-          const u = (px + (sx + 0.5) / ss) / size;
-          const v = (py + (sy + 0.5) / ss) / size;
-          const c = sampler(u, v);
-          r += c[0] * c[3];
-          g += c[1] * c[3];
-          b += c[2] * c[3];
-          a += c[3];
+function extractCleanSquircleIcon(src) {
+  const { width: w, height: h, rgba } = src;
+  const alphaMask = new Uint8Array(w * h);
+  alphaMask.fill(255);
+
+  // Check if outer corners already carry transparency
+  const cornerAlpha = rgba[3];
+  if (cornerAlpha === 255) {
+    // Exterior flood-fill from image borders across near-black pixels (<= 14 luminance)
+    const visited = new Uint8Array(w * h);
+    const queue = new Int32Array(w * h);
+    let head = 0;
+    let tail = 0;
+
+    const tryEnqueue = (x, y) => {
+      const idx = y * w + x;
+      if (visited[idx]) return;
+      const p = idx * 4;
+      const lum = Math.max(rgba[p], rgba[p + 1], rgba[p + 2]);
+      if (lum <= 14) {
+        visited[idx] = 1;
+        alphaMask[idx] = 0;
+        queue[tail++] = idx;
+      }
+    };
+
+    for (let x = 0; x < w; x++) {
+      tryEnqueue(x, 0);
+      tryEnqueue(x, h - 1);
+    }
+    for (let y = 0; y < h; y++) {
+      tryEnqueue(0, y);
+      tryEnqueue(w - 1, y);
+    }
+
+    while (head < tail) {
+      const idx = queue[head++];
+      const x = idx % w;
+      const y = (idx / w) | 0;
+      if (x > 0) tryEnqueue(x - 1, y);
+      if (x + 1 < w) tryEnqueue(x + 1, y);
+      if (y > 0) tryEnqueue(x, y - 1);
+      if (y + 1 < h) tryEnqueue(x, y + 1);
+    }
+
+    // Softly feather 2px perimeter ring for clean edge anti-aliasing over any desktop theme
+    const feathered = new Uint8Array(alphaMask);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x;
+        if (alphaMask[idx] === 0) continue;
+        let zeroNeighbors = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (alphaMask[(y + dy) * w + (x + dx)] === 0) zeroNeighbors++;
+          }
+        }
+        if (zeroNeighbors > 0) {
+          const coverage = 1 - zeroNeighbors / 10;
+          const p = idx * 4;
+          const lum = Math.max(rgba[p], rgba[p + 1], rgba[p + 2]);
+          feathered[idx] = Math.round(clamp(coverage * Math.min(1, lum / 22), 0.12, 1) * 255);
         }
       }
-      const n = ss * ss;
-      const outA = a / n;
-      const idx = (py * size + px) * 4;
-      if (outA > 1e-6) {
-        buf[idx] = Math.round(clamp(r / a, 0, 255));
-        buf[idx + 1] = Math.round(clamp(g / a, 0, 255));
-        buf[idx + 2] = Math.round(clamp(b / a, 0, 255));
-        buf[idx + 3] = Math.round(clamp(outA * 255, 0, 255));
+    }
+    for (let i = 0; i < w * h; i++) {
+      rgba[i * 4 + 3] = feathered[i];
+    }
+  }
+
+  // Locate tight square bounding box of the visible squircle icon
+  let minX = w;
+  let minY = h;
+  let maxX = 0;
+  let maxY = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (rgba[(y * w + x) * 4 + 3] > 20) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
       }
     }
   }
-  return buf;
+
+  const bw = maxX - minX + 1;
+  const bh = maxY - minY + 1;
+  const side = Math.round(Math.max(bw, bh) * 1.05); // slight margin for clean Windows shell padding
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const sx0 = Math.round(cx - side * 0.5);
+  const sy0 = Math.round(cy - side * 0.5);
+
+  const cropped = Buffer.alloc(side * side * 4);
+  for (let y = 0; y < side; y++) {
+    const sy = sy0 + y;
+    if (sy < 0 || sy >= h) continue;
+    for (let x = 0; x < side; x++) {
+      const sx = sx0 + x;
+      if (sx < 0 || sx >= w) continue;
+      const srcIdx = (sy * w + sx) * 4;
+      const dstIdx = (y * side + x) * 4;
+      cropped[dstIdx] = rgba[srcIdx];
+      cropped[dstIdx + 1] = rgba[srcIdx + 1];
+      cropped[dstIdx + 2] = rgba[srcIdx + 2];
+      cropped[dstIdx + 3] = rgba[srcIdx + 3];
+    }
+  }
+  return { width: side, height: side, rgba: cropped };
+}
+
+function resizePremultipliedBox(src, targetSize) {
+  const { width: sw, height: sh, rgba: srcBuf } = src;
+  const out = Buffer.alloc(targetSize * targetSize * 4);
+  const scaleX = sw / targetSize;
+  const scaleY = sh / targetSize;
+
+  for (let dy = 0; dy < targetSize; dy++) {
+    const sy0 = dy * scaleY;
+    const sy1 = (dy + 1) * scaleY;
+    const iy0 = Math.max(0, Math.floor(sy0));
+    const iy1 = Math.min(sh - 1, Math.floor(sy1));
+
+    for (let dx = 0; dx < targetSize; dx++) {
+      const sx0 = dx * scaleX;
+      const sx1 = (dx + 1) * scaleX;
+      const ix0 = Math.max(0, Math.floor(sx0));
+      const ix1 = Math.min(sw - 1, Math.floor(sx1));
+
+      let pr = 0;
+      let pg = 0;
+      let pb = 0;
+      let pa = 0;
+      let weightSum = 0;
+
+      for (let sy = iy0; sy <= iy1; sy++) {
+        const wy = Math.min(sy + 1, sy1) - Math.max(sy, sy0);
+        if (wy <= 0) continue;
+        for (let sx = ix0; sx <= ix1; sx++) {
+          const wx = Math.min(sx + 1, sx1) - Math.max(sx, sx0);
+          if (wx <= 0) continue;
+          const w = wx * wy;
+          const idx = (sy * sw + sx) * 4;
+          const a = srcBuf[idx + 3] / 255;
+          pr += srcBuf[idx] * a * w;
+          pg += srcBuf[idx + 1] * a * w;
+          pb += srcBuf[idx + 2] * a * w;
+          pa += a * w;
+          weightSum += w;
+        }
+      }
+
+      const dstIdx = (dy * targetSize + dx) * 4;
+      if (weightSum > 0 && pa > 1e-6) {
+        const avgA = pa / weightSum;
+        out[dstIdx] = Math.round(clamp(pr / pa, 0, 255));
+        out[dstIdx + 1] = Math.round(clamp(pg / pa, 0, 255));
+        out[dstIdx + 2] = Math.round(clamp(pb / pa, 0, 255));
+        out[dstIdx + 3] = Math.round(clamp(avgA * 255, 0, 255));
+      }
+    }
+  }
+  return out;
 }
 
 const crcTable = new Uint32Array(256);
@@ -178,16 +294,13 @@ function encodePNG(width, height, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
+  ihdr[8] = 8;
+  ihdr[9] = 6;
 
   const stride = width * 4;
   const raw = Buffer.alloc((stride + 1) * height);
   for (let y = 0; y < height; y++) {
-    raw[y * (stride + 1)] = 0; // filter None
+    raw[y * (stride + 1)] = 0;
     rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
   const compressed = zlib.deflateSync(raw, { level: 9 });
@@ -200,11 +313,10 @@ function encodePNG(width, height, rgba) {
 }
 
 function encodeICO(entries) {
-  // Embed PNG frames directly inside ICO (supported since Windows Vista+)
   const count = entries.length;
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
-  header.writeUInt16LE(1, 2); // ICON
+  header.writeUInt16LE(1, 2);
   header.writeUInt16LE(count, 4);
 
   const dir = Buffer.alloc(count * 16);
@@ -216,8 +328,6 @@ function encodeICO(entries) {
     const base = i * 16;
     dir[base] = size >= 256 ? 0 : size;
     dir[base + 1] = size >= 256 ? 0 : size;
-    dir[base + 2] = 0;
-    dir[base + 3] = 0;
     dir.writeUInt16LE(1, base + 4);
     dir.writeUInt16LE(32, base + 6);
     dir.writeUInt32LE(png.length, base + 8);
@@ -229,7 +339,19 @@ function encodeICO(entries) {
   return Buffer.concat([header, dir, ...payloads]);
 }
 
-function encodeBMP24(width, height, rgbSampler) {
+function compositeOverRGB(dst, srcRgba, srcSize, dx, dy) {
+  if (dx < 0 || dy < 0 || dx >= srcSize || dy >= srcSize) return dst;
+  const idx = (dy * srcSize + dx) * 4;
+  const a = srcRgba[idx + 3] / 255;
+  if (a <= 0.001) return dst;
+  return [
+    srcRgba[idx] * a + dst[0] * (1 - a),
+    srcRgba[idx + 1] * a + dst[1] * (1 - a),
+    srcRgba[idx + 2] * a + dst[2] * (1 - a),
+  ];
+}
+
+function encodeBMP24(width, height, pixelFn) {
   const rowSize = Math.ceil((width * 3) / 4) * 4;
   const imgSize = rowSize * height;
   const fileSize = 54 + imgSize;
@@ -246,9 +368,9 @@ function encodeBMP24(width, height, rgbSampler) {
   buf.writeUInt32LE(imgSize, 34);
 
   for (let y = 0; y < height; y++) {
-    const bmpY = height - 1 - y; // bottom-up
+    const bmpY = height - 1 - y;
     for (let x = 0; x < width; x++) {
-      const [r, g, b] = rgbSampler(x / width, y / height);
+      const [r, g, b] = pixelFn(x, y);
       const idx = 54 + bmpY * rowSize + x * 3;
       buf[idx] = Math.round(clamp(b, 0, 255));
       buf[idx + 1] = Math.round(clamp(g, 0, 255));
@@ -258,10 +380,19 @@ function encodeBMP24(width, height, rgbSampler) {
   return buf;
 }
 
+if (!fs.existsSync(sourceLogoPath)) {
+  throw new Error(`Missing primary branding image at ${sourceLogoPath}`);
+}
+
+const decoded = decodePNG(sourceLogoPath);
+const master = extractCleanSquircleIcon(decoded);
+
 const pngSizes = [16, 24, 32, 48, 64, 128, 256, 512];
+const rgbaBySize = new Map();
 const pngBySize = new Map();
 for (const size of pngSizes) {
-  const rgba = renderRGBA(size, sampleIconPixel);
+  const rgba = resizePremultipliedBox(master, size);
+  rgbaBySize.set(size, rgba);
   pngBySize.set(size, encodePNG(size, size, rgba));
 }
 
@@ -269,6 +400,9 @@ fs.writeFileSync(path.join(iconsDir, '32x32.png'), pngBySize.get(32));
 fs.writeFileSync(path.join(iconsDir, '128x128.png'), pngBySize.get(128));
 fs.writeFileSync(path.join(iconsDir, '128x128@2x.png'), pngBySize.get(256));
 fs.writeFileSync(path.join(iconsDir, 'icon.png'), pngBySize.get(512));
+fs.writeFileSync(docsIconPath, pngBySize.get(256));
+fs.writeFileSync(webIconPath, pngBySize.get(256));
+fs.writeFileSync(path.join(srcAssetsDir, 'icon.png'), pngBySize.get(128));
 
 const ico = encodeICO([
   { size: 16, png: pngBySize.get(16) },
@@ -281,33 +415,35 @@ const ico = encodeICO([
 ]);
 fs.writeFileSync(path.join(iconsDir, 'icon.ico'), ico);
 
-// NSIS header banner (150x57) and welcome sidebar (164x314)
-const headerBmp = encodeBMP24(150, 57, (u, v) => {
-  const bg = mixColor([11, 14, 23, 1], [23, 31, 52, 1], u * 0.7 + (1 - v) * 0.3);
-  const iconSize = 0.76;
-  const iconU = (u - 0.76) / (iconSize * (57 / 150)) + 0.5;
-  const iconV = (v - 0.5) / iconSize + 0.5;
-  if (iconU >= 0 && iconU <= 1 && iconV >= 0 && iconV <= 1) {
-    const px = sampleIconPixel(iconU, iconV);
-    const out = blendOver(bg, px);
-    return [out[0], out[1], out[2]];
-  }
-  return [bg[0], bg[1], bg[2]];
+// NSIS header banner (150x57) — clean dark obsidian surface with monochrome pillvyn-logo
+const headerIconSize = 44;
+const headerIconRgba = resizePremultipliedBox(master, headerIconSize);
+const headerBmp = encodeBMP24(150, 57, (x, y) => {
+  const t = (x / 150) * 0.65 + (1 - y / 57) * 0.35;
+  let col = [11 + t * 9, 13 + t * 10, 18 + t * 12];
+  if (y === 56) col = [34, 38, 48];
+  const ix = x - (150 - headerIconSize - 10);
+  const iy = y - Math.floor((57 - headerIconSize) / 2);
+  return compositeOverRGB(col, headerIconRgba, headerIconSize, ix, iy);
 });
 fs.writeFileSync(path.join(nsisDir, 'header.bmp'), headerBmp);
 
-const sidebarBmp = encodeBMP24(164, 314, (u, v) => {
-  let bg = mixColor([9, 12, 20, 1], [19, 27, 47, 1], 1 - v);
-  const glow = Math.exp(-((u - 0.5) ** 2 * 4 + (v - 0.34) ** 2 * 6));
-  bg = blendOver(bg, [62, 130, 255, glow * 0.35]);
-  const iconU = (u - 0.5) / 0.62 + 0.5;
-  const iconV = (v - 0.34) / (0.62 * (164 / 314)) + 0.5;
-  if (iconU >= 0 && iconU <= 1 && iconV >= 0 && iconV <= 1) {
-    const px = sampleIconPixel(iconU, iconV);
-    bg = blendOver(bg, px);
-  }
-  return [bg[0], bg[1], bg[2]];
+// NSIS wizard welcome/finish sidebar (164x314)
+const sidebarIconSize = 104;
+const sidebarIconRgba = resizePremultipliedBox(master, sidebarIconSize);
+const sidebarBmp = encodeBMP24(164, 314, (x, y) => {
+  const u = x / 164;
+  const v = y / 314;
+  const glow = Math.exp(-((u - 0.5) ** 2 * 5.0 + (v - 0.33) ** 2 * 8.0));
+  let col = [
+    9 + (1 - v) * 8 + glow * 16,
+    11 + (1 - v) * 9 + glow * 18,
+    16 + (1 - v) * 12 + glow * 24,
+  ];
+  const ix = x - Math.floor((164 - sidebarIconSize) / 2);
+  const iy = y - 48;
+  return compositeOverRGB(col, sidebarIconRgba, sidebarIconSize, ix, iy);
 });
 fs.writeFileSync(path.join(nsisDir, 'sidebar.bmp'), sidebarBmp);
 
-console.log('[PILLVYN] Generated icons (.png, .ico) and NSIS branding bitmaps.');
+console.log('[PILLVYN] Generated all v1.1.0 icons, tray PNGs, ICO, website assets, and NSIS branding from pillvyn-logo.png.');

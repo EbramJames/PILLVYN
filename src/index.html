@@ -21,18 +21,18 @@
         <div id="view-minimized" class="view-minimized" title="Click to restore PILLVYN">
           <span id="mini-dot" class="mini-dot"></span>
           <span id="mini-time" class="mini-time">--:--</span>
-          <span id="mini-label" class="mini-label">IDLE</span>
+          <span id="mini-label" class="mini-label"></span>
         </div>
 
         <!-- Compact Capsule -->
-        <div id="view-compact" class="view-compact" title="Click to expand PILLVYN · Right-click to minimize">
+        <div id="view-compact" class="view-compact" title="Click to expand · Swipe left/right · Scroll for volume · Right-click to minimize">
           <div class="compact-left">
             <div id="compact-artwork" class="compact-artwork">
-              <span id="compact-artwork-icon"></span>
+              <img src="assets/icon.png" alt="PILLVYN" />
             </div>
             <div class="compact-meta">
               <div id="compact-title" class="compact-title">PILLVYN</div>
-              <div id="compact-sub" class="compact-sub">Windows Dynamic Hub</div>
+              <div id="compact-sub" class="compact-sub"></div>
             </div>
           </div>
           <div class="compact-right">
@@ -42,7 +42,11 @@
               <span class="eq-bar"></span>
               <span class="eq-bar"></span>
             </div>
+            <div id="compact-peek" class="compact-peek" aria-label="Quick playback controls"></div>
             <span id="compact-chip" class="compact-chip">--:--</span>
+          </div>
+          <div id="compact-progress" class="compact-progress" aria-hidden="true">
+            <span id="compact-progress-fill" class="compact-progress-fill"></span>
           </div>
         </div>
 
@@ -50,22 +54,25 @@
         <div id="view-expanded" class="view-expanded">
           <header class="expanded-header">
             <div class="brand-pill">
-              <span class="brand-orb"></span>
+              <img src="assets/icon.png" alt="" class="brand-logo" />
               <span class="brand-name">PILLVYN</span>
+              <span class="brand-sep" aria-hidden="true"></span>
               <span id="header-clock" class="header-clock">--:--</span>
+              <span id="header-profile" class="header-profile" style="display: none;"></span>
             </div>
             <div class="header-controls">
-              <button id="btn-dnd" class="icon-btn" title="Do Not Disturb"></button>
-              <button id="btn-focus" class="icon-btn" title="Focus Mode"></button>
-              <button id="btn-minimize" class="icon-btn" title="Minimize Capsule"></button>
-              <button id="btn-collapse" class="icon-btn" title="Collapse to Compact"></button>
-              <button id="btn-settings" class="icon-btn" title="Open Settings Studio"></button>
+              <button id="btn-pin" class="icon-btn ghost" title="Pin Open (Ignore Click Outside)"></button>
+              <button id="btn-dnd" class="icon-btn ghost" title="Do Not Disturb"></button>
+              <button id="btn-focus" class="icon-btn ghost" title="Focus Mode"></button>
+              <button id="btn-minimize" class="icon-btn ghost" title="Minimize Capsule"></button>
+              <button id="btn-collapse" class="icon-btn ghost" title="Collapse to Compact"></button>
+              <button id="btn-settings" class="icon-btn ghost" title="Settings Studio"></button>
             </div>
           </header>
 
           <div id="activities-strip" class="activities-strip" aria-label="Live Activities"></div>
 
-          <nav id="module-nav" class="module-nav" role="tablist" aria-label="PILLVYN Modules"></nav>
+          <nav id="module-nav" class="module-nav" role="tablist" aria-label="PILLVYN Navigation"></nav>
 
           <section id="module-panel" class="module-panel" role="tabpanel"></section>
         </div>

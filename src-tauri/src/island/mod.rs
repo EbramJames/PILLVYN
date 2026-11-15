@@ -1,9 +1,12 @@
 pub mod activities;
 
+use crate::commands::AppState;
 use crate::config::PillvynConfig;
+use crate::island::activities::now_ms;
+use crate::services::win_hooks::is_mouse_button_down;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
 
 pub const ISLAND_CANVAS_WIDTH: f64 = 560.0;
 pub const ISLAND_CANVAS_HEIGHT: f64 = 500.0;
@@ -132,6 +135,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         let mut last_ignoring: Option<bool> = None;
+        let mut prev_mouse_down = false;
 
         loop {
             let (hitbox, force_ct, visible) = match state.lock() {
@@ -143,6 +147,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
             };
 
             if !visible {
+                prev_mouse_down = false;
                 std::thread::sleep(std::time::Duration::from_millis(200));
                 continue;
             }
@@ -152,6 +157,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
                 continue;
             };
 
+            let mut cursor_known = false;
             let should_ignore = if force_ct {
                 true
             } else if let (Ok(win_pos), Ok(scale)) =
@@ -160,6 +166,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
                 let mut pt = POINT::default();
                 let ok = unsafe { GetCursorPos(&mut pt).is_ok() };
                 if ok {
+                    cursor_known = true;
                     let local_x = (pt.x - win_pos.x) as f64 / scale.max(1.0);
                     let local_y = (pt.y - win_pos.y) as f64 / scale.max(1.0);
                     let margin = 6.0;
@@ -180,6 +187,34 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
             {
                 last_ignoring = Some(should_ignore);
             }
+
+            // Detect fresh clicks strictly outside the Expanded pill so clicking anywhere on
+            // another window or desktop collapses the island immediately (unless pinned).
+            let mouse_down = is_mouse_button_down();
+            if cursor_known && should_ignore && mouse_down && !prev_mouse_down {
+                if let Some(app_state) = app.try_state::<AppState>() {
+                    let expanded = app_state
+                        .island_expanded
+                        .lock()
+                        .map(|g| *g)
+                        .unwrap_or(false);
+                    let pinned = app_state.island_pinned.lock().map(|g| *g).unwrap_or(false);
+                    let last_exp = app_state.last_expanded_ms.lock().map(|g| *g).unwrap_or(0);
+                    let dismiss_enabled = app_state
+                        .config
+                        .lock()
+                        .map(|c| c.appearance.click_outside_dismiss)
+                        .unwrap_or(true);
+                    if expanded
+                        && !pinned
+                        && dismiss_enabled
+                        && now_ms().saturating_sub(last_exp) > 350
+                    {
+                        let _ = app.emit("pillvyn://dismiss-expanded", "outside_click");
+                    }
+                }
+            }
+            prev_mouse_down = mouse_down;
 
             std::thread::sleep(std::time::Duration::from_millis(38));
         }

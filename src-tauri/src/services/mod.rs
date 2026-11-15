@@ -11,3 +11,4 @@ pub mod plugins;
 pub mod system_ctrl;
 pub mod updater;
 pub mod widgets;
+pub mod win_hooks;

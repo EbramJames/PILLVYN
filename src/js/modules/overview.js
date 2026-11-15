@@ -5,17 +5,18 @@ export function renderOverview(store, api) {
 
   // 1. Live Now Playing or Focus Summary Card
   const media = store.media;
+  const activeTimer = (store.timers || []).find((t) => t.running && !t.completed);
   if (media && media.active) {
-    const thumb = el('div', { class: 'album-art', style: { width: '48px', height: '48px', borderRadius: '11px' } }, [
+    const thumb = el('div', { class: 'album-art', style: { width: '46px', height: '46px', borderRadius: '11px' } }, [
       media.thumbnail_data_url
         ? el('img', { src: media.thumbnail_data_url, alt: media.title || 'Album art' })
-        : icon('music', 20),
+        : icon('music', 18),
     ]);
     const playIcon = media.status === 'Playing' ? icon('pause', 14) : icon('play', 14);
-    const controls = el('div', { style: { display: 'flex', gap: '5px', alignItems: 'center' } }, [
-      el('button', { class: 'icon-btn', title: 'Previous', onClick: () => api.mediaControl('previous') }, icon('prev', 13)),
+    const controls = el('div', { style: { display: 'flex', gap: '4px', alignItems: 'center' } }, [
+      el('button', { class: 'icon-btn ghost', title: 'Previous', onClick: () => api.mediaControl('previous') }, icon('prev', 13)),
       el('button', { class: 'icon-btn active', title: 'Play / Pause', onClick: () => api.mediaControl('play_pause') }, playIcon),
-      el('button', { class: 'icon-btn', title: 'Next', onClick: () => api.mediaControl('next') }, icon('next', 13)),
+      el('button', { class: 'icon-btn ghost', title: 'Next', onClick: () => api.mediaControl('next') }, icon('next', 13)),
     ]);
 
     const pct = media.duration_sec > 0 ? Math.min(100, (media.position_sec / media.duration_sec) * 100) : 0;
@@ -25,73 +26,92 @@ export function renderOverview(store, api) {
           thumb,
           el('div', { class: 'track-meta' }, [
             el('div', { class: 'track-title', style: { fontSize: '13px' }, text: media.title || 'Media Playing' }),
-            el('div', { class: 'track-artist', text: `${media.artist || media.source_app || 'Windows Media'} · ${formatDuration(media.position_sec)} / ${formatDuration(media.duration_sec)}` }),
+            el('div', { class: 'track-artist', text: `${media.artist || media.source_app || 'Media'} · ${formatDuration(media.position_sec)} / ${formatDuration(media.duration_sec)}` }),
           ]),
           controls,
         ]),
-        el('div', { class: 'meter-track', style: { marginTop: '8px', height: '4px' } }, [
+        el('div', { class: 'meter-track', style: { marginTop: '8px', height: '3px' } }, [
+          el('div', { class: 'meter-fill', style: { width: `${pct}%` } }),
+        ]),
+      ])
+    );
+  } else if (activeTimer) {
+    const pct = activeTimer.total_seconds > 0
+      ? Math.max(0, Math.min(100, (1 - activeTimer.remaining_seconds / activeTimer.total_seconds) * 100))
+      : 0;
+    root.appendChild(
+      el('div', { class: 'glass-card' }, [
+        el('div', { class: 'card-title-row', style: { marginBottom: '4px' } }, [
+          el('span', { class: 'card-label', text: activeTimer.label }),
+          el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
+            el('span', { class: 'card-value', text: formatDuration(activeTimer.remaining_seconds) }),
+            el('button', { class: 'pill-btn', style: { padding: '2px 8px', fontSize: '10px' }, onClick: () => api.timerAction('toggle', activeTimer.id) }, 'Pause'),
+          ]),
+        ]),
+        el('div', { class: 'meter-track', style: { height: '3px' } }, [
           el('div', { class: 'meter-fill', style: { width: `${pct}%` } }),
         ]),
       ])
     );
   }
 
-  // 2. Quick System Sliders (Volume + Brightness)
+  // 2. Quick Audio & Brightness Controls (hide brightness card when display lacks DDC/CI or WMI)
   const sys = store.system;
   if (sys) {
     const volPct = Math.round((sys.output_volume || 0) * 100);
     const brightPct = sys.brightness ?? 0;
 
-    const volBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${volPct}%, rgba(255, 255, 255, 0.12) ${volPct}%)`;
-    const brightBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${brightPct}%, rgba(255, 255, 255, 0.12) ${brightPct}%)`;
+    const volBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${volPct}%, rgba(255, 255, 255, 0.14) ${volPct}%)`;
+    const brightBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${brightPct}%, rgba(255, 255, 255, 0.14) ${brightPct}%)`;
 
-    root.appendChild(
-      el('div', { class: 'grid-2' }, [
-        el('div', { class: 'glass-card' }, [
-          el('div', { class: 'card-title-row' }, [
-            el('span', { class: 'card-label', text: 'Volume' }),
-            el('span', { class: 'card-value', text: sys.output_muted ? 'Muted' : `${volPct}%` }),
-          ]),
-          el('input', {
-            type: 'range',
-            class: 'range-slider',
-            min: '0',
-            max: '100',
-            value: String(volPct),
-            style: { background: volBg },
-            onInput: (e) => {
-              const v = Number(e.target.value);
-              e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${v}%, rgba(255, 255, 255, 0.12) ${v}%)`;
-              api.setVolume(false, v / 100);
-            },
-          }),
+    const volCard = el('div', { class: 'glass-card' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('span', { class: 'card-label', text: 'Volume' }),
+        el('button', {
+          class: 'pill-btn',
+          style: { padding: '1px 7px', fontSize: '10.5px' },
+          onClick: () => api.setMute(false, !sys.output_muted),
+        }, [icon(sys.output_muted ? 'mute' : 'volume', 11), el('span', { text: sys.output_muted ? 'Muted' : `${volPct}%` })]),
+      ]),
+      el('input', {
+        type: 'range',
+        class: 'range-slider',
+        min: '0',
+        max: '100',
+        value: String(volPct),
+        style: { background: volBg },
+        onInput: (e) => {
+          const v = Number(e.target.value);
+          e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
+          api.setVolume(false, v / 100);
+        },
+      }),
+    ]);
+
+    if (sys.brightness_supported) {
+      const brightCard = el('div', { class: 'glass-card' }, [
+        el('div', { class: 'card-title-row' }, [
+          el('span', { class: 'card-label', text: 'Brightness' }),
+          el('span', { class: 'card-value', text: `${brightPct}%` }),
         ]),
-        el('div', { class: 'glass-card' }, [
-          el('div', { class: 'card-title-row' }, [
-            el('span', { class: 'card-label', text: 'Brightness' }),
-            el('span', {
-              class: 'card-value',
-              text: sys.brightness_supported ? `${brightPct}%` : 'N/A',
-            }),
-          ]),
-          sys.brightness_supported
-            ? el('input', {
-                type: 'range',
-                class: 'range-slider',
-                min: '0',
-                max: '100',
-                value: String(brightPct),
-                style: { background: brightBg },
-                onInput: (e) => {
-                  const v = Number(e.target.value);
-                  e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent-2) ${v}%, rgba(255, 255, 255, 0.12) ${v}%)`;
-                },
-                onChange: (e) => api.setBrightness(Number(e.target.value)),
-              })
-            : el('div', { class: 'muted', text: 'DDC/CI or internal panel unavailable' }),
-        ]),
-      ])
-    );
+        el('input', {
+          type: 'range',
+          class: 'range-slider',
+          min: '0',
+          max: '100',
+          value: String(brightPct),
+          style: { background: brightBg },
+          onInput: (e) => {
+            const v = Number(e.target.value);
+            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
+          },
+          onChange: (e) => api.setBrightness(Number(e.target.value)),
+        }),
+      ]);
+      root.appendChild(el('div', { class: 'grid-2' }, [volCard, brightCard]));
+    } else {
+      root.appendChild(volCard);
+    }
   }
 
   // 3. Telemetry Pulse Row (CPU/RAM, Network, Battery)
@@ -130,7 +150,7 @@ export function renderOverview(store, api) {
           class: 'card-value',
           style: { marginTop: '4px' },
           text: batt?.present
-            ? `${batt.percent ?? '--'}%${batt.charging ? ' ⚡' : ''}`
+            ? `${batt.percent ?? '--'}%${batt.charging ? ' · Chg' : ''}`
             : (batt?.ac_online ? 'AC Power' : 'Desktop'),
         }),
         el('div', {

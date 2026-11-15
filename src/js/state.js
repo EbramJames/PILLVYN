@@ -2,7 +2,12 @@
 
 export const store = {
   islandState: 'compact', // 'minimized' | 'compact' | 'expanded'
-  activeTab: 'overview',
+  activeTab: 'overview', // 'overview' | 'music' | 'system' | 'monitor' | 'notifications' | 'clipboard' | 'utilities'
+  monitorSubTab: 'hardware', // 'hardware' | 'network' | 'downloads' | 'gaming'
+  utilitiesSubTab: 'widgets', // 'widgets' | 'actions' | 'plugins' | 'ai'
+  pinned: false,
+  compactHovered: false,
+  activityCycleIndex: 0,
   config: null,
   monitors: [],
   activities: [],
@@ -20,7 +25,7 @@ export const store = {
   weather: null,
   plugins: null,
   activeProfile: null,
-  appVersion: '1.0.0',
+  appVersion: '1.1.0',
   aiResponse: null,
   aiError: null,
   aiLoading: false,
