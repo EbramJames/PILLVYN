@@ -1,0 +1,70 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "PILLVYN",
+  "version": "1.0.0",
+  "identifier": "com.pillvyn.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev:frontend",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build:frontend",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "island",
+        "title": "PILLVYN",
+        "url": "index.html",
+        "width": 560,
+        "height": 500,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": true,
+        "focus": false,
+        "focusable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Utility",
+    "shortDescription": "Premium Dynamic Island for Windows 10 and Windows 11",
+    "longDescription": "PILLVYN is a lightweight, modular Dynamic Island floating hub for Windows 10/11 featuring live media controls, system telemetry, hardware monitoring, gaming mode, downloads, clipboard history, network stats, quick actions, widgets, and extensible plugins.",
+    "copyright": "Copyright (c) 2026 PILLVYN Contributors",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "both",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "nsis/header.bmp",
+        "sidebarImage": "nsis/sidebar.bmp",
+        "installerHooks": "nsis/installer.nsh",
+        "languages": ["English"],
+        "displayLanguageSelector": false,
+        "minimumWebview2Version": "110.0.0.0",
+        "startMenuFolder": "PILLVYN"
+      }
+    }
+  }
+}

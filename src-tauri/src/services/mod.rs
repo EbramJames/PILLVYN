@@ -1,0 +1,13 @@
+pub mod actions;
+pub mod ai;
+pub mod clipboard;
+pub mod downloads;
+pub mod gaming;
+pub mod hardware;
+pub mod media;
+pub mod network;
+pub mod notifications;
+pub mod plugins;
+pub mod system_ctrl;
+pub mod updater;
+pub mod widgets;

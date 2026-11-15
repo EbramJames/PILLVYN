@@ -1,0 +1,79 @@
+import { el, formatRelativeTime, icon } from '../utils.js';
+
+export function renderNotifications(store, api) {
+  const hub = store.notifications;
+  const items = hub?.items || [];
+  const dnd = Boolean(store.config?.privacy?.dnd_mode);
+
+  const root = el('div', { class: 'stack' }, [
+    el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } }, [
+      el('span', {
+        class: `badge ${hub?.windows_listener_status === 'granted' ? 'ok' : 'warn'}`,
+        text: hub?.windows_listener_status === 'granted'
+          ? 'Windows Action Center: Synced'
+          : 'Local Hub Active (Unpackaged Win32)',
+      }),
+      el('div', { style: { display: 'flex', gap: '5px' } }, [
+        el('button', {
+          class: 'pill-btn',
+          onClick: () => api.pushNotification('PILLVYN', 'Alert Channel Verified', 'Notification pipeline & priority routing active.', 'normal'),
+        }, 'Test Alert'),
+        el('button', {
+          class: 'pill-btn',
+          disabled: items.length === 0,
+          onClick: () => api.notificationAction('mark_all_read'),
+        }, 'Read All'),
+        el('button', {
+          class: 'pill-btn danger',
+          disabled: items.length === 0,
+          onClick: () => api.notificationAction('clear_all'),
+        }, 'Clear'),
+      ]),
+    ]),
+  ]);
+
+  if (hub?.windows_listener_detail && hub.windows_listener_status !== 'granted') {
+    root.appendChild(el('div', { class: 'notice-banner', text: hub.windows_listener_detail }));
+  }
+
+  if (dnd) {
+    root.appendChild(el('div', { class: 'notice-banner', text: 'Do Not Disturb is active — only Critical alerts trigger island banners; others are archived quietly.' }));
+  }
+
+  if (items.length === 0) {
+    root.appendChild(
+      el('div', { class: 'empty-state' }, [
+        icon('bell', 22),
+        el('div', { style: { marginTop: '6px', fontWeight: '600', color: 'var(--text-primary)' }, text: 'All Caught Up' }),
+        el('div', { class: 'muted', style: { marginTop: '3px' }, text: 'Timer alarms, system alerts, and plugin notifications appear here.' }),
+      ])
+    );
+    return root;
+  }
+
+  for (const n of items) {
+    const prioClass = n.priority === 'critical' ? 'danger' : n.priority === 'high' ? 'warn' : '';
+    root.appendChild(
+      el('div', { class: 'list-item', style: { opacity: n.read ? '0.66' : '1' } }, [
+        el('div', { style: { minWidth: '0', flex: '1' }, onClick: () => api.notificationAction('mark_read', n.id) }, [
+          el('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [
+            el('span', { class: `badge ${prioClass}`, text: n.app_name || 'System' }),
+            el('span', { style: { fontWeight: '600', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }, text: n.title }),
+          ]),
+          n.body
+            ? el('div', { class: 'muted', style: { marginTop: '3px', fontSize: '11px' }, text: n.body })
+            : null,
+          el('div', { class: 'muted', style: { fontSize: '10px', marginTop: '2px' }, text: `${formatRelativeTime(n.timestamp_ms)}${n.suppressed_by_dnd ? ' · Muted by DND' : ''}` }),
+        ]),
+        el('button', {
+          class: 'icon-btn',
+          style: { width: '24px', height: '24px' },
+          title: 'Dismiss',
+          onClick: () => api.notificationAction('dismiss', n.id),
+        }, icon('trash', 12)),
+      ])
+    );
+  }
+
+  return root;
+}

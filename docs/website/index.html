@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PILLVYN — Premium Dynamic Island for Windows 10 &amp; 11</title>
+    <meta name="description" content="PILLVYN is an ultra-lightweight, open-source Dynamic Island desktop hub for Windows 10 and Windows 11 built with Rust and Tauri 2." />
+    <link rel="icon" type="image/png" href="assets/icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-nav">
+      <div class="nav-inner">
+        <a href="#top" class="brand">
+          <img src="assets/icon.png" alt="PILLVYN Logo" width="30" height="30" />
+          <span>PILLVYN</span>
+        </a>
+        <nav class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#screenshots">Screenshots</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#install">Download</a>
+          <a href="https://github.com/pillvyn/pillvyn" target="_blank" rel="noopener">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="pill-tag">Open Source · Rust + Tauri 2 · Windows 10 / 11 (x64)</div>
+        <h1>A Living Capsule at the Top of Windows.</h1>
+        <p class="hero-copy">
+          PILLVYN brings an obsidian-glass Dynamic Island to your desktop — uniting live Windows media controls, WASAPI audio routing, hardware &amp; GPU telemetry, Steam/browser downloads, clipboard history, and gaming focus into a fast, near-zero-idle floating hub.
+        </p>
+
+        <div class="hero-actions">
+          <a href="https://github.com/pillvyn/pillvyn/releases/latest" class="btn-primary">Download Windows Setup (.exe)</a>
+          <a href="#preview" class="btn-secondary">Interactive Capsule Preview</a>
+        </div>
+
+        <div id="preview" class="island-demo-stage">
+          <div class="demo-controls">
+            <button class="demo-chip active" data-demo-state="compact">Compact Pill</button>
+            <button class="demo-chip" data-demo-state="expanded">Expanded Hub</button>
+            <button class="demo-chip" data-demo-state="minimized">Minimized Notch</button>
+            <span class="demo-divider"></span>
+            <button class="demo-theme active" data-demo-theme="obsidian">Obsidian</button>
+            <button class="demo-theme" data-demo-theme="aurora">Aurora</button>
+            <button class="demo-theme" data-demo-theme="crimson">Crimson</button>
+          </div>
+
+          <div id="demo-capsule" class="demo-capsule" data-state="compact" data-theme="obsidian">
+            <div class="dc-mini">
+              <span class="dc-dot"></span>
+              <span>21:42</span>
+              <span class="dc-muted">LIVE</span>
+            </div>
+            <div class="dc-compact">
+              <div class="dc-art">♪</div>
+              <div class="dc-meta">
+                <strong>Windows GSMTC Media</strong>
+                <span>Click Expanded Hub to inspect modules</span>
+              </div>
+              <div class="dc-eq"><span></span><span></span><span></span><span></span></div>
+            </div>
+            <div class="dc-expanded">
+              <div class="dc-exp-head">
+                <span class="dc-brand">PILLVYN</span>
+                <div class="dc-badges">
+                  <span>Media</span>
+                  <span>System</span>
+                  <span>Hardware</span>
+                  <span>Game</span>
+                </div>
+              </div>
+              <div class="dc-exp-grid">
+                <div class="dc-tile">
+                  <small>NOW PLAYING</small>
+                  <strong>Spotify · GSMTC</strong>
+                  <div class="dc-bar"><i style="width: 64%"></i></div>
+                </div>
+                <div class="dc-tile">
+                  <small>SYSTEM</small>
+                  <strong>WASAPI + DDC/CI</strong>
+                  <div class="dc-bar"><i style="width: 78%"></i></div>
+                </div>
+                <div class="dc-tile">
+                  <small>HARDWARE</small>
+                  <strong>NVML / DXGI / PDH</strong>
+                  <div class="dc-bar"><i style="width: 42%"></i></div>
+                </div>
+                <div class="dc-tile">
+                  <small>NETWORK</small>
+                  <strong>GetIfTable2 + ICMP</strong>
+                  <div class="dc-bar"><i style="width: 55%"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="demo-caption">Interactive UI state preview — full native Windows telemetry runs inside the installed desktop application.</p>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <h2>Twelve Modular Capabilities, Zero Bloat</h2>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>Dynamic Island Core</h3>
+            <p>Frameless transparent capsule with Minimized, Compact, and Expanded spring states, multi-monitor DPI awareness, and smart cursor click-through around the pill.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Windows Media (GSMTC)</h3>
+            <p>Live track metadata, extracted album artwork, seekable timeline, and playback transport controls across Spotify, Edge, Chrome, Firefox, and VLC.</p>
+          </article>
+          <article class="feature-card">
+            <h3>WASAPI Audio &amp; System</h3>
+            <p>Master output &amp; microphone gain/mute, default output/input device switching, WMI + DDC/CI brightness, battery telemetry, and Windows connectivity shortcuts.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Hardware &amp; GPU Telemetry</h3>
+            <p>CPU, RAM, disk volumes, DXGI adapter discovery, Windows PDH 3D engine load, and NVIDIA NVML temperatures, VRAM, and wattage where supported.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Anti-Cheat Safe Gaming Mode</h3>
+            <p>Detects Steam RunningAppID, known games, and fullscreen apps, auto-suppresses notifications, and supports click-through HUD mode without DLL injection.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Downloads, Clipboard &amp; Net</h3>
+            <p>Real `.crdownload`/`.part`/Steam `.acf` progress &amp; ETA, event-driven `AddClipboardFormatListener` history, and live `GetIfTable2` + ICMP ping + VPN detection.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="screenshots" class="section">
+        <h2>Captured Directly on Windows 11</h2>
+        <div class="gallery-compact">
+          <figure class="shot-card">
+            <img src="assets/screenshots/compact-view.png" alt="PILLVYN Compact Dynamic Island Pill" loading="lazy" />
+            <figcaption><strong>Compact Capsule</strong> — Live CPU/network ticker &amp; time badge floating at top-center.</figcaption>
+          </figure>
+        </div>
+        <div class="gallery-grid">
+          <figure class="shot-card">
+            <img src="assets/screenshots/expanded-home.png" alt="PILLVYN Expanded Home Hub" loading="lazy" />
+            <figcaption><strong>Home Dashboard</strong> — WASAPI Volume, DDC/CI Brightness, telemetry pulse, and Quick Actions.</figcaption>
+          </figure>
+          <figure class="shot-card">
+            <img src="assets/screenshots/expanded-stats.png" alt="PILLVYN Hardware Stats Tab" loading="lazy" />
+            <figcaption><strong>Hardware Telemetry</strong> — Live CPU, RAM, NVIDIA NVML GPU temperature/VRAM, and disks.</figcaption>
+          </figure>
+          <figure class="shot-card">
+            <img src="assets/screenshots/expanded-widgets.png" alt="PILLVYN Clock Weather Timers Tab" loading="lazy" />
+            <figcaption><strong>Widgets Panel</strong> — Clock, Open-Meteo weather, stopwatch, and focus countdown timers.</figcaption>
+          </figure>
+          <figure class="shot-card">
+            <img src="assets/screenshots/settings-studio.png" alt="PILLVYN Dedicated Settings Studio" loading="lazy" />
+            <figcaption><strong>Settings Studio</strong> — Themes, multi-monitor positioning, hotkeys, autostart, and privacy.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="architecture" class="section alt-surface">
+        <h2>Engineered for Speed, Privacy, and Restraint</h2>
+        <div class="arch-grid">
+          <div>
+            <h4>Event-Driven Native Backend</h4>
+            <p>Built on Rust and Tauri 2 using WebView2 instead of bundling a separate Chromium runtime. Clipboard capture uses Win32 window messages (`WM_CLIPBOARDUPDATE`) with zero polling, and adaptive telemetry intervals slow down automatically on battery power.</p>
+          </div>
+          <div>
+            <h4>Restrictive Security Model</h4>
+            <p>Per-window Tauri v2 capability isolation, strict Quick Action and URL validation, sensitive clipboard token filtering, consent-gated GitHub Release update checks, and strictly optional local Ollama AI support.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" class="section install-box">
+        <h2>Install PILLVYN on Windows 10 / 11</h2>
+        <p>Packaged as a standalone x64 NSIS setup executable with Start Menu &amp; Desktop shortcuts, clean upgrade shutdown hooks, and automatic WebView2 bootstrap verification.</p>
+        <div class="code-box">
+          <code>winget / GitHub Releases → PILLVYN_1.0.0_x64-setup.exe</code>
+        </div>
+        <div class="hero-actions" style="margin-top: 20px;">
+          <a href="https://github.com/pillvyn/pillvyn/releases/latest" class="btn-primary">Get Latest Installer</a>
+          <a href="https://github.com/pillvyn/pillvyn#building-from-source" class="btn-secondary">Build from Source</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>PILLVYN · MIT Licensed Open Source Project</span>
+      <span>Built with Rust, Tauri 2, HTML5, CSS3 &amp; Vanilla JS</span>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

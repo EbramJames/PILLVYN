@@ -1,0 +1,29 @@
+# Dependencies & Build Outputs
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Logs & Local Env
+*.log
+npm-debug.log*
+.env
+.env.local
+.env.*.local
+
+# Temporary / Release Artifacts
+*.exe
+*.msi
+*.sig
+*.zip
+!src-tauri/icons/**

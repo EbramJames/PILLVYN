@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PILLVYN — Settings Studio</title>
+    <link rel="stylesheet" href="styles/tokens.css" />
+    <link rel="stylesheet" href="styles/modules.css" />
+    <link rel="stylesheet" href="styles/settings.css" />
+  </head>
+  <body data-theme="obsidian">
+    <div class="settings-app">
+      <aside class="settings-sidebar">
+        <div>
+          <div class="sidebar-brand">
+            <span class="brand-orb" style="width: 14px; height: 14px;"></span>
+            <div>
+              <div class="sidebar-brand-title">PILLVYN</div>
+              <div id="sidebar-version" class="sidebar-brand-sub">v1.0.0 · Settings Studio</div>
+            </div>
+          </div>
+          <nav id="settings-nav" class="sidebar-nav"></nav>
+        </div>
+
+        <div class="stack">
+          <button id="btn-reset-defaults" class="pill-btn">Reset Defaults</button>
+          <button id="btn-save-settings" class="pill-btn primary">Save Changes</button>
+        </div>
+      </aside>
+
+      <main class="settings-main">
+        <header class="settings-topbar">
+          <div>
+            <h1 id="settings-title" class="settings-heading">Appearance</h1>
+            <p id="settings-desc" class="settings-subheading">Customize theme, translucency, scale, and monitor placement.</p>
+          </div>
+          <div class="header-controls">
+            <span id="dirty-badge" class="badge" style="display: none;">Unsaved changes</span>
+          </div>
+        </header>
+
+        <section id="settings-content" class="settings-content"></section>
+      </main>
+    </div>
+
+    <div id="toast-bar" class="toast-bar"></div>
+    <script type="module" src="js/settings.js"></script>
+  </body>
+</html>

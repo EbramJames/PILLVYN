@@ -1,0 +1,105 @@
+:root {
+  --font-sans: "Segoe UI Variable", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+
+  --accent: #5b8cff;
+  --accent-2: #2ce6c5;
+  --accent-soft: rgba(91, 140, 255, 0.18);
+  --accent-glow: rgba(91, 140, 255, 0.32);
+
+  --island-opacity: 0.88;
+  --island-scale: 1;
+  --compact-width: 268px;
+
+  --surface-bg: rgba(10, 13, 20, var(--island-opacity));
+  --surface-elevated: rgba(255, 255, 255, 0.055);
+  --surface-elevated-hover: rgba(255, 255, 255, 0.095);
+  --surface-subtle: rgba(255, 255, 255, 0.032);
+  --border-glass: rgba(255, 255, 255, 0.13);
+  --border-subtle: rgba(255, 255, 255, 0.075);
+  --specular-top: rgba(255, 255, 255, 0.22);
+
+  --text-primary: #f4f7ff;
+  --text-secondary: rgba(226, 234, 255, 0.72);
+  --text-muted: rgba(186, 198, 232, 0.5);
+
+  --status-ok: #34d399;
+  --status-warn: #fbbf24;
+  --status-danger: #f87171;
+  --status-info: #60a5fa;
+
+  --spring: cubic-bezier(0.22, 1.24, 0.36, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --shadow-island:
+    0 20px 44px rgba(0, 0, 0, 0.62),
+    0 4px 14px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 var(--specular-top);
+}
+
+[data-theme="aurora"] {
+  --surface-bg: rgba(9, 17, 24, var(--island-opacity));
+  --accent: #2ce6c5;
+  --accent-2: #5b8cff;
+  --accent-soft: rgba(44, 230, 197, 0.18);
+  --accent-glow: rgba(44, 230, 197, 0.3);
+}
+
+[data-theme="midnight"] {
+  --surface-bg: rgba(5, 6, 11, var(--island-opacity));
+  --accent: #7c5cff;
+  --accent-2: #5b8cff;
+  --accent-soft: rgba(124, 92, 255, 0.2);
+  --accent-glow: rgba(124, 92, 255, 0.34);
+}
+
+[data-theme="crimson"] {
+  --surface-bg: rgba(18, 10, 14, var(--island-opacity));
+  --accent: #ff4d6d;
+  --accent-2: #ff8f5b;
+  --accent-soft: rgba(255, 77, 109, 0.2);
+  --accent-glow: rgba(255, 77, 109, 0.34);
+}
+
+[data-theme="frosted"] {
+  --surface-bg: rgba(26, 31, 44, var(--island-opacity));
+  --border-glass: rgba(255, 255, 255, 0.2);
+  --specular-top: rgba(255, 255, 255, 0.32);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
