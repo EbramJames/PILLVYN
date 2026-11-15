@@ -115,6 +115,25 @@ function setIslandState(next) {
 const api = {
   switchTab(tabId) {
     const route = resolveTabRoute(tabId);
+    const modules = store.config?.modules || {};
+    const requiredMod = {
+      music: 'music',
+      system: 'system',
+      hardware: 'hardware',
+      network: 'network',
+      downloads: 'downloads',
+      gaming: 'gaming',
+      notifications: 'notifications',
+      clipboard: 'clipboard',
+      actions: 'actions',
+      widgets: 'widgets',
+      plugins: 'plugins',
+      ai: 'ai',
+    }[route];
+    if (requiredMod && modules[requiredMod] === false) {
+      patchStore({ activeTab: 'overview' }, 'tab');
+      return;
+    }
     patchStore(route, 'tab-change');
     if (store.islandState !== 'expanded') setIslandState('expanded');
   },
@@ -166,12 +185,28 @@ const api = {
     invoke?.('run_quick_action', { item }).catch(console.error);
   },
   addQuickAction(item) {
-    if (!store.config) return;
+    if (!store.config) return Promise.resolve(false);
     const nextCfg = structuredClone(store.config);
     nextCfg.quick_actions = [...(nextCfg.quick_actions || []), item];
+    return invoke?.('save_app_config', { newConfig: nextCfg }).then((saved) => {
+      if (saved) patchStore({ config: saved }, 'config');
+      return true;
+    }).catch((err) => {
+      console.error(err);
+      return false;
+    });
+  },
+  removeQuickAction(id) {
+    if (!store.config || !id) return;
+    const nextCfg = structuredClone(store.config);
+    nextCfg.quick_actions = (nextCfg.quick_actions || []).filter((q) => q.id !== id);
     invoke?.('save_app_config', { newConfig: nextCfg }).then((saved) => {
       if (saved) patchStore({ config: saved }, 'config');
     }).catch(console.error);
+  },
+  validateQuickAction(kind, target) {
+    if (!invoke) return Promise.resolve(target);
+    return invoke('validate_quick_action_cmd', { kind, target });
   },
   openUrl(url) {
     invoke?.('open_url', { url }).catch(console.error);
@@ -616,6 +651,13 @@ async function bootstrap() {
 
   if (listen) {
     await listen('pillvyn://config', (e) => patchStore({ config: e.payload }, 'config'));
+    await listen('pillvyn://appearance-preview', (e) => {
+      const nextCfg = {
+        ...(store.config || {}),
+        appearance: e.payload,
+      };
+      patchStore({ config: nextCfg }, 'config');
+    });
     await listen('pillvyn://activities', (e) => patchStore({ activities: e.payload }, 'activities'));
     await listen('pillvyn://media', (e) => patchStore({ media: e.payload }, 'media'));
     await listen('pillvyn://system', (e) => patchStore({ system: e.payload }, 'system'));

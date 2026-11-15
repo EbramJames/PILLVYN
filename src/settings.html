@@ -5,45 +5,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PILLVYN — Settings Studio</title>
     <link rel="stylesheet" href="styles/tokens.css" />
-    <link rel="stylesheet" href="styles/modules.css" />
     <link rel="stylesheet" href="styles/settings.css" />
   </head>
   <body data-theme="obsidian">
-    <div class="settings-app">
+    <div class="settings-shell">
       <aside class="settings-sidebar">
-        <div>
-          <div class="sidebar-brand">
-            <img src="assets/icon.png" alt="PILLVYN" style="width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.12);" />
-            <div>
-              <div class="sidebar-brand-title">PILLVYN</div>
-              <div id="sidebar-version" class="sidebar-brand-sub">v1.1.0 · Settings Studio</div>
-            </div>
+        <div class="brand-lockup">
+          <img src="assets/icon.png" alt="PILLVYN Logo" class="brand-emblem" />
+          <div class="brand-copy">
+            <span class="brand-name">PILLVYN</span>
+            <span id="studio-version" class="brand-sub">Studio · v1.2.0</span>
           </div>
-          <nav id="settings-nav" class="sidebar-nav"></nav>
         </div>
 
-        <div class="stack">
-          <button id="btn-reset-defaults" class="pill-btn">Reset Defaults</button>
-          <button id="btn-save-settings" class="pill-btn primary">Save Changes</button>
+        <nav id="settings-nav" class="settings-nav" aria-label="Settings Categories"></nav>
+
+        <div class="sidebar-status" id="sidebar-status">
+          <div class="sidebar-status-row">
+            <span id="sidebar-status-dot" class="status-dot is-online"></span>
+            <span id="sidebar-status-text" class="sidebar-status-title">Island Active</span>
+          </div>
+          <div id="sidebar-status-meta" class="sidebar-status-meta">1 display ready</div>
+          <div class="sidebar-quick-btns">
+            <button id="btn-toggle-island" type="button" class="btn-mini">Hide / Show</button>
+            <button id="btn-expand-island" type="button" class="btn-mini">Expand</button>
+          </div>
         </div>
       </aside>
 
       <main class="settings-main">
         <header class="settings-topbar">
-          <div>
-            <h1 id="settings-title" class="settings-heading">Appearance</h1>
-            <p id="settings-desc" class="settings-subheading">Customize theme, translucency, scale, and monitor placement.</p>
+          <div class="topbar-copy">
+            <h1 id="section-title">Appearance</h1>
+            <p id="section-subtitle">Choose your glass theme, accent color, and live capsule sizing.</p>
           </div>
-          <div class="header-controls">
-            <span id="dirty-badge" class="badge" style="display: none;">Unsaved changes</span>
+          <div class="topbar-actions">
+            <span id="dirty-pill" class="dirty-pill is-saved">All Saved</span>
+            <button id="btn-revert" type="button" class="btn-secondary" disabled>Revert</button>
+            <button id="btn-reset" type="button" class="btn-secondary">Reset Defaults</button>
+            <button id="btn-save" type="button" class="btn-primary">Save Changes</button>
           </div>
         </header>
 
-        <section id="settings-content" class="settings-content"></section>
+        <div id="settings-banner" class="settings-banner is-hidden" role="status" aria-live="polite"></div>
+
+        <div id="settings-content" class="settings-content"></div>
       </main>
     </div>
 
-    <div id="toast-bar" class="toast-bar"></div>
     <script type="module" src="js/settings.js"></script>
   </body>
 </html>

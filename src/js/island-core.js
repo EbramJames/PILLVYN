@@ -1,3 +1,4 @@
+import { applyAppearanceVars } from './theme.js';
 import { clear, el, formatSpeed, formatTimeShort, icon } from './utils.js';
 
 export const MODULE_TABS = [
@@ -46,10 +47,14 @@ export function applyVisualTheme(shell, config, profileOverride) {
   if (!config) return;
   const ap = config.appearance || {};
   const activeTheme = profileOverride?.theme_override || ap.theme || 'obsidian';
-  shell.setAttribute('data-theme', activeTheme);
-  document.documentElement.style.setProperty('--accent', ap.accent_color || '#5b8cff');
-  document.documentElement.style.setProperty('--island-opacity', String(ap.opacity ?? 0.90));
-  document.documentElement.style.setProperty('--island-scale', String(ap.scale ?? 1));
+  applyAppearanceVars(
+    { ...ap, theme: activeTheme },
+    {
+      themeTarget: shell,
+      varTarget: document.documentElement,
+      applyOpacity: true,
+    }
+  );
   document.documentElement.style.setProperty('--compact-width', `${ap.compact_width ?? 268}px`);
   document.body.classList.toggle('reduced-motion', Boolean(ap.reduced_motion));
 }

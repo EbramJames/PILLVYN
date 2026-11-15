@@ -115,36 +115,52 @@ export function renderOverview(store, api) {
   }
 
   // 3. Telemetry Pulse Row (CPU/RAM, Network, Battery)
+  const mods = store.config?.modules || {};
   const hw = store.hardware;
   const net = store.network;
   const batt = sys?.battery;
+  const hwEnabled = mods.hardware !== false;
+  const netEnabled = mods.network !== false;
+  const sysEnabled = mods.system !== false;
   root.appendChild(
     el('div', { class: 'grid-3' }, [
-      el('div', { class: 'glass-card', style: { cursor: 'pointer' }, onClick: () => api.switchTab('hardware') }, [
+      el('div', {
+        class: 'glass-card',
+        style: hwEnabled ? { cursor: 'pointer' } : {},
+        onClick: hwEnabled ? () => api.switchTab('hardware') : undefined,
+      }, [
         el('div', { class: 'card-label', text: 'CPU / RAM' }),
         el('div', {
           class: 'card-value',
           style: { marginTop: '4px' },
-          text: hw ? `${Math.round(hw.cpu_usage_percent)}% · ${Math.round(hw.ram_percent)}%` : 'Sampling…',
+          text: !hwEnabled ? 'Off' : (hw ? `${Math.round(hw.cpu_usage_percent)}% · ${Math.round(hw.ram_percent)}%` : 'Sampling…'),
         }),
         el('div', {
           class: 'muted',
-          text: hw ? `${formatBytes(hw.ram_used_bytes)} RAM` : 'Hardware',
+          text: !hwEnabled ? 'Disabled in Settings' : (hw ? `${formatBytes(hw.ram_used_bytes)} RAM` : 'Hardware'),
         }),
       ]),
-      el('div', { class: 'glass-card', style: { cursor: 'pointer' }, onClick: () => api.switchTab('network') }, [
+      el('div', {
+        class: 'glass-card',
+        style: netEnabled ? { cursor: 'pointer' } : {},
+        onClick: netEnabled ? () => api.switchTab('network') : undefined,
+      }, [
         el('div', { class: 'card-label', text: net?.vpn_active ? 'Network · VPN' : 'Network' }),
         el('div', {
           class: 'card-value',
           style: { marginTop: '4px' },
-          text: net ? (net.connected ? `↓ ${formatSpeed(net.download_bps)}` : 'Offline') : 'Probing…',
+          text: !netEnabled ? 'Off' : (net ? (net.connected ? `↓ ${formatSpeed(net.download_bps)}` : 'Offline') : 'Probing…'),
         }),
         el('div', {
           class: 'muted',
-          text: net?.ping_ms != null ? `Ping ${net.ping_ms} ms` : (net?.adapter_name || 'Adapter'),
+          text: !netEnabled ? 'Disabled in Settings' : (net?.ping_ms != null ? `Ping ${net.ping_ms} ms` : (net?.adapter_name || 'Adapter')),
         }),
       ]),
-      el('div', { class: 'glass-card', style: { cursor: 'pointer' }, onClick: () => api.switchTab('system') }, [
+      el('div', {
+        class: 'glass-card',
+        style: sysEnabled ? { cursor: 'pointer' } : {},
+        onClick: sysEnabled ? () => api.switchTab('system') : undefined,
+      }, [
         el('div', { class: 'card-label', text: 'Power' }),
         el('div', {
           class: 'card-value',

@@ -5,6 +5,17 @@ All notable changes to **PILLVYN** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-16
+### Added
+- **Custom Obsidian Glass Tray Menu (`tray.html`)**: Replaced the native Windows tray right-click menu with a bespoke frameless Obsidian Glass popover featuring live Island status, optional Now Playing strip, instant toggles for Visibility, Expand/Collapse, Do Not Disturb, Focus Mode, Settings Studio, and Quit — automatically clamped inside the active monitor work area for both taskbar and tray-overflow clicks.
+- **Redesigned Settings Studio**: Reorganized Settings Studio into 5 intuitive categories (`Appearance`, `Display & Behavior`, `Modules & Tools`, `Shortcuts & Apps`, `Privacy & System`) with a live capsule preview stage, curated accent color dots + live hex readout, real-time `preview_appearance` slider synchronization, interactive global hotkey recorder, and full CRUD management for custom Quick Actions and per-app Profiles.
+- **Unified Validation & Sync IPC**: Added `save_settings_config` (surfacing duplicate hotkey errors and OS registration/autostart warnings cleanly), `validate_quick_action_cmd`, `preview_appearance`, `cancel_appearance_preview`, `get_tray_state`, `tray_action`, and `pillvyn://island-state` real-time visibility/expansion synchronization.
+
+### Fixed
+- **Accent Color Across All Themes**: Fixed `[data-theme]` rules in `tokens.css` overriding user-selected `--accent`, `--accent-soft`, and `--accent-glow` variables on `aurora`, `midnight`, `crimson`, and `frosted` themes; extracted shared theme/slider styling utilities into `src/js/theme.js`.
+- **Settings Sliders & Missing Controls**: Fixed range slider filled-track progress bars, live numeric value readouts, single-click per-slider `Default` reset buttons, unified the AI module & engine enable switches (`modules.ai` / `ai.enabled`), and exposed `x_offset`, `auto_collapse_ms`, and `clock_24h` controls in Settings Studio.
+- **Window Visibility & Disabled-Module Coordination**: Fixed `toggle_expand`, `clipboard_drawer`, and single-instance wakeups updating `IslandWindowState::is_visible` and geometry properly; cleared stale `force_click_through` flags and Live Activities when Gaming, Downloads, or Music modules are turned off; prevented clicking disabled telemetry cards in Overview.
+
 ## [1.1.0] - 2026-11-16
 ### Added
 - **Unified Brand Identity**: Applied the sculpted obsidian & platinum **PILLVYN** emblem (`pillvyn-logo.png`) across app icons, titlebars, tray PNGs, Settings Studio, NSIS wizard bitmaps, README, and website assets.

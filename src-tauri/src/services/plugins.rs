@@ -95,7 +95,7 @@ pub fn create_example_plugin() -> Result<LoadedPlugin, String> {
     let manifest = PluginManifest {
         id: "focus-pomodoro".into(),
         name: "Pomodoro Live Card".into(),
-        version: "1.1.0".into(),
+        version: "1.2.0".into(),
         author: "PILLVYN".into(),
         description:
             "Adds a one-click 25-minute Deep Work Live Activity action to the Plugins drawer."

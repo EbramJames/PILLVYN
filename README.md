@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.1.0" src="https://img.shields.io/badge/Version-v1.1.0-f4f7ff?labelColor=090a0e" /></a>
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.2.0" src="https://img.shields.io/badge/Version-v1.2.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -32,12 +32,21 @@
 | :---: | :---: |
 | <img src="docs/screenshots/expanded-home.png" alt="PILLVYN Expanded Hub" width="420" /> | <img src="docs/screenshots/expanded-stats.png" alt="PILLVYN Monitor Telemetry" width="420" /> |
 
-| Tools (`Timers / Shortcuts / Plugins / AI`) | Settings Studio |
+| Redesigned Settings Studio | Custom Obsidian Glass Tray Menu |
 | :---: | :---: |
-| <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> | <img src="docs/screenshots/settings-studio.png" alt="PILLVYN Settings Studio" width="460" /> |
+| <img src="docs/screenshots/settings-studio.png" alt="PILLVYN Settings Studio" width="460" /> | <img src="docs/screenshots/tray-menu.png" alt="PILLVYN Custom Obsidian Glass Tray Menu" width="230" /> |
 
-## Features & v1.1.0 Highlights
+| Tools (`Timers / Shortcuts / Plugins / AI`) |
+| :---: |
+| <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
 
+## Features & v1.2.0 Highlights
+
+- **Custom Obsidian Glass Tray Menu & Full State Sync**:
+  - Replaced the native Windows tray right-click menu with a lightweight frameless Obsidian Glass popover showing active Live Status, Now Playing strip, toggle switches for **Island Visible**, **Do Not Disturb**, and **Focus Mode**, quick **Expand / Collapse**, **Settings Studio**, and **Quit** — automatically positioned inside the active monitor work area whether opened from the taskbar or the Windows tray overflow flyout.
+  - Real-time state synchronization (`pillvyn://island-state`, live appearance preview, startup Windows autostart sync, and clean disabling of background monitors/HUD overrides when a module is turned off).
+- **Redesigned 5-Tab Settings Studio**:
+  - Cleanly organized into **Appearance**, **Display & Behavior**, **Modules & Tools**, **Shortcuts & Apps**, and **Privacy & System** with a live Capsule Preview stage, curated Accent swatches working across every theme, interactive range sliders with filled tracks & single-click defaults, keystroke recorder for global hotkeys, and full management for Quick Actions and Per-App Rules.
 - **Quiet Obsidian Glass UI & Dynamic Island Core**:
   - Frameless, layered obsidian glass with uniform monochrome SVG icons and clean typography.
   - Streamlined **7-tab Expanded Dock** (`Hub`, `Media`, `Controls`, `Monitor`, `Alerts`, `Clip`, `Tools`) with segmented sub-views so the pill stays calm and uncluttered.
@@ -54,13 +63,13 @@
   - **Win32 Foreground & Fullscreen Sync**: `SetWinEventHook` + `SHQueryUserNotificationState` apply per-app profiles automatically without stealing focus or spawning child CLI processes.
 - **System Controls & Hardware Monitor**: Master/mic gain & mute, default device switching (`IPolicyConfig`), cached WMI/DDC-CI display brightness where exposed by the monitor, CPU/RAM/Disk (`sysinfo`), DXGI/PDH GPU load, and NVIDIA NVML temperatures/VRAM/wattage where supported.
 - **Anti-Cheat Safe Gaming, Downloads, Clipboard & Network**: Native registry Steam `RunningAppID` & process detection without DLL injection, `.crdownload`/`.part`/`.opdownload`/Steam `.acf` download ETA, `AddClipboardFormatListener` history with secret filtering, `GetIfTable2` throughput, ICMP latency, and VPN detection.
-- **Tools, Plugins, Optional AI & Settings Studio**: Quick shortcuts, countdown timers, stopwatch, cached Open-Meteo weather, local `plugin.json` manifests (`%APPDATA%\pillvyn\PILLVYN\config\plugins`), strictly opt-in local Ollama/OpenAI-compatible AI, tray menu, Windows autostart, global hotkeys, and consent-gated GitHub Release updates.
+- **Tools, Plugins, Optional AI & Updater**: Quick shortcuts with strict scheme validation, countdown timers, stopwatch, 12h/24h clock & Open-Meteo weather, local `plugin.json` manifests (`%APPDATA%\pillvyn\PILLVYN\config\plugins`), strictly opt-in local Ollama/OpenAI-compatible AI, global hotkeys with duplicate validation, Windows autostart, and consent-gated GitHub Release updates.
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.1.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.2.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
 2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_1.1.0_x64-setup.exe.sha256`.
+3. Verify integrity (optional): compare against `PILLVYN_1.2.0_x64-setup.exe.sha256`.
 4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**
@@ -75,9 +84,10 @@
 PILLVYN/
 ├── src/                        # Vanilla JS, HTML5, CSS3 frontend (zero framework overhead)
 │   ├── index.html              # Floating Dynamic Island capsule UI
-│   ├── settings.html           # Dedicated Settings Studio window
-│   ├── styles/                 # Quiet Obsidian Glass tokens, island animations, module & settings styles
-│   └── js/                     # Store, safe DOM helpers, core gesture/state machine, 12 modular renderers
+│   ├── settings.html           # Dedicated 5-section Settings Studio window
+│   ├── tray.html               # Custom Obsidian Glass taskbar tray popover
+│   ├── styles/                 # Quiet Obsidian Glass tokens, island, module, tray & settings styles
+│   └── js/                     # Store, theme engine, core gestures, tray/settings & 12 modules
 ├── src-tauri/
 │   ├── capabilities/           # Restrictive per-window Tauri v2 capability definitions
 │   ├── nsis/                   # NSIS installer hooks & branded wizard bitmaps

@@ -1,476 +1,1379 @@
-import { clear, el, icon } from './utils.js';
+import {
+  THEME_PRESETS,
+  applyAppearanceVars,
+  getThemePreset,
+  normalizeHexColor,
+  updateRangeTrackFill,
+} from './theme.js';
 
-const tauri = window.__TAURI__;
-const invoke = tauri?.core?.invoke;
-const listen = tauri?.event?.listen;
+const { invoke } = window.__TAURI__?.core || {};
+const { listen } = window.__TAURI__?.event || {};
+const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
 
 const SECTIONS = [
-  { id: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Customize theme, glass opacity, scale, and multi-monitor position.' },
-  { id: 'modules', label: 'Modules', icon: 'grid', desc: 'Choose which Dynamic Island tabs and sensors stay active.' },
-  { id: 'shortcuts', label: 'Shortcuts & Profiles', icon: 'zap', desc: 'Configure global hotkeys, Windows startup, and automatic app profiles.' },
-  { id: 'gaming', label: 'Gaming & Widgets', icon: 'gamepad', desc: 'Configure game detection, weather location, and clock settings.' },
-  { id: 'privacy', label: 'Privacy & Updates', icon: 'shield', desc: 'Control clipboard filters, DND, performance, and consented updates.' },
-  { id: 'integrations', label: 'Plugins & AI', icon: 'sparkles', desc: 'Manage local plugins and optional Ollama or OpenAI-compatible AI.' },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    subtitle: 'Theme palette, accent glow, live transparency, and capsule proportions.',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.8 1.6-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.8-1.7 1.7-1.7H17c2.8 0 5-2.2 5-5 0-4.9-4.5-8.4-10-8.4z"/></svg>`,
+  },
+  {
+    id: 'behavior',
+    label: 'Display & Behavior',
+    subtitle: 'Monitor positioning, hover interactions, and auto-collapse timing.',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+  },
+  {
+    id: 'modules',
+    label: 'Modules & Tools',
+    subtitle: 'Choose active hub modules, weather units, gaming focus, and local AI.',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  },
+  {
+    id: 'shortcuts',
+    label: 'Shortcuts & Apps',
+    subtitle: 'Global hotkeys, custom quick actions, and per-application focus rules.',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  },
+  {
+    id: 'system',
+    label: 'Privacy & System',
+    subtitle: 'Startup behavior, clipboard safety, focus toggles, and app updates.',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  },
 ];
 
+const QUICK_ACCENTS = ['#5b8cff', '#38d9c0', '#8c78ff', '#f05a74', '#36d399', '#f4b740'];
+
+const MODULE_META = [
+  ['music', 'Music Player', 'Active media detection, artwork, and playback controls'],
+  ['system', 'System Controls', 'Master volume, microphone mute, brightness, and audio outputs'],
+  ['hardware', 'Hardware Monitor', 'Live CPU, RAM, GPU, and storage utilization'],
+  ['network', 'Network Monitor', 'Real-time download/upload speed, ping latency, and VPN state'],
+  ['gaming', 'Gaming Mode', 'Detect fullscreen games, suppress distractions, click-through HUD'],
+  ['downloads', 'Download Monitor', 'Track Steam & browser download progress inside the capsule'],
+  ['notifications', 'Notification Center', 'Alert inbox with priority filtering and Do Not Disturb'],
+  ['clipboard', 'Clipboard History', 'Recent copies with one-click paste and privacy filter'],
+  ['actions', 'Quick Actions', 'One-click launchpad for system tools, URIs, and URLs'],
+  ['widgets', 'Clock & Weather', 'Timers, stopwatch, 24h/12h clock, and local weather forecast'],
+  ['plugins', 'Plugins', 'Load lightweight community live-card extensions'],
+  ['ai', 'AI Assistant', 'Local Ollama or OpenAI-compatible prompt assistant'],
+];
+
+const TAB_CHOICES = [
+  ['', 'Keep Current Tab'],
+  ['overview', 'Hub Overview'],
+  ['music', 'Media Player'],
+  ['system', 'System Controls'],
+  ['gaming', 'Gaming Focus'],
+  ['hardware', 'Hardware Stats'],
+  ['network', 'Network Monitor'],
+  ['notifications', 'Alerts'],
+  ['clipboard', 'Clipboard'],
+  ['actions', 'Quick Actions'],
+  ['widgets', 'Timers & Weather'],
+];
+
+let savedConfig = null;
 let config = null;
 let monitors = [];
-let appVersion = '1.1.0';
+let plugins = null;
+let appVersion = '1.2.0';
+let islandVisible = true;
+let islandExpanded = false;
 let activeSection = 'appearance';
 let dirty = false;
-let updateStatus = null;
+let resetConfirmArmed = false;
+let resetConfirmTimer = null;
+let updateResult = null;
+let recordingHotkeyKey = null;
+let previewDebounceTimer = null;
 
-function showToast(msg) {
-  const bar = document.getElementById('toast-bar');
-  bar.textContent = msg;
-  bar.classList.add('visible');
-  setTimeout(() => bar.classList.remove('visible'), 2800);
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+    else node.setAttribute(k, String(v));
+  }
+  for (const child of Array.isArray(children) ? children : [children]) {
+    if (child == null) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
 }
 
-function markDirty() {
-  dirty = true;
-  document.getElementById('dirty-badge').style.display = 'inline-flex';
+function showBanner(message, tone = 'ok') {
+  const banner = document.getElementById('settings-banner');
+  if (!banner) return;
+  if (!message) {
+    banner.className = 'settings-banner is-hidden';
+    banner.textContent = '';
+    return;
+  }
+  banner.className = `settings-banner is-${tone}`;
+  banner.innerHTML = '';
+  banner.appendChild(el('span', { text: message }));
+  banner.appendChild(
+    el('button', {
+      type: 'button',
+      class: 'btn-mini',
+      onClick: () => showBanner(''),
+    }, 'Dismiss')
+  );
 }
 
-function clearDirty() {
-  dirty = false;
-  document.getElementById('dirty-badge').style.display = 'none';
+function setDirtyState(nextDirty) {
+  dirty = Boolean(nextDirty);
+  const pill = document.getElementById('dirty-pill');
+  const revertBtn = document.getElementById('btn-revert');
+  if (pill) {
+    pill.textContent = dirty ? 'Unsaved Changes' : 'All Saved';
+    pill.className = `dirty-pill ${dirty ? 'is-dirty' : 'is-saved'}`;
+  }
+  if (revertBtn) {
+    revertBtn.disabled = !dirty;
+  }
 }
 
-function toggleSwitch(checked, onChange) {
-  return el('button', {
-    type: 'button',
-    class: 'toggle-switch',
-    role: 'switch',
-    'aria-checked': checked ? 'true' : 'false',
-    onClick: () => {
-      onChange(!checked);
-      markDirty();
-      renderSection();
-    },
+function syncSettingsTheme() {
+  if (!config?.appearance) return;
+  applyAppearanceVars(config.appearance, {
+    themeTarget: document.body,
+    varTarget: document.documentElement,
+    applyOpacity: true,
   });
 }
 
-function row(name, desc, control) {
+function scheduleLiveAppearancePreview() {
+  syncSettingsTheme();
+  updateLivePreviewBox();
+  if (!invoke || !config?.appearance) return;
+  clearTimeout(previewDebounceTimer);
+  previewDebounceTimer = setTimeout(() => {
+    invoke('preview_appearance', { appearance: config.appearance }).catch(() => {});
+  }, 45);
+}
+
+function updateSidebarStatus() {
+  const dot = document.getElementById('sidebar-status-dot');
+  const text = document.getElementById('sidebar-status-text');
+  const meta = document.getElementById('sidebar-status-meta');
+  if (dot) {
+    dot.className = `status-dot ${islandVisible ? 'is-online' : 'is-hidden'}`;
+  }
+  if (text) {
+    text.textContent = !islandVisible
+      ? 'Island Hidden'
+      : islandExpanded
+        ? 'Island Expanded'
+        : 'Island Compact';
+  }
+  if (meta) {
+    const count = monitors.length || 1;
+    meta.textContent = `${count} ${count === 1 ? 'display' : 'displays'} detected`;
+  }
+}
+
+function updateLivePreviewBox() {
+  const cap = document.getElementById('preview-capsule');
+  const titleEl = document.getElementById('preview-title');
+  const badgeEl = document.getElementById('preview-badge');
+  const captionEl = document.getElementById('preview-caption');
+  if (!cap || !config?.appearance) return;
+  const ap = config.appearance;
+  const preset = getThemePreset(ap.theme);
+  applyAppearanceVars(ap, { themeTarget: cap, varTarget: cap, applyOpacity: true });
+  cap.style.width = `${Math.round((ap.compact_width || 268) * (ap.scale || 1))}px`;
+  if (titleEl) {
+    titleEl.textContent = config.privacy?.dnd_mode
+      ? 'Do Not Disturb'
+      : config.privacy?.focus_mode
+        ? 'Focus Active'
+        : 'PILLVYN · Ready';
+  }
+  if (badgeEl) {
+    badgeEl.textContent = `${preset.name}`;
+  }
+  if (captionEl) {
+    captionEl.textContent = `Theme ${preset.name} · Accent ${normalizeHexColor(ap.accent_color).toUpperCase()} · Opacity ${Math.round((ap.opacity ?? 0.88) * 100)}% · Width ${ap.compact_width}px`;
+  }
+}
+
+function toggleRow(title, desc, checked, onChange, { id } = {}) {
+  const input = el('input', { type: 'checkbox', id });
+  input.checked = Boolean(checked);
+  input.addEventListener('change', (e) => {
+    setDirtyState(true);
+    onChange(Boolean(e.target.checked));
+  });
+
   return el('div', { class: 'setting-row' }, [
-    el('div', { class: 'setting-info' }, [
-      el('div', { class: 'setting-name', text: name }),
-      desc ? el('div', { class: 'setting-desc', text: desc }) : null,
+    el('div', { class: 'row-info' }, [
+      el('div', { class: 'row-title', text: title }),
+      desc ? el('div', { class: 'row-desc', text: desc }) : null,
     ]),
-    el('div', { class: 'setting-control' }, control),
+    el('label', { class: 'switch' }, [input, el('span', { class: 'switch-track' })]),
   ]);
 }
 
-function renderSidebar() {
+function sliderField({
+  id,
+  title,
+  desc,
+  value,
+  min,
+  max,
+  step = 1,
+  defaultValue,
+  format = (v) => String(v),
+  minLabel,
+  maxLabel,
+  onChange,
+  livePreview = false,
+}) {
+  const readout = el('span', { class: 'slider-readout', id: id ? `${id}-value` : undefined, text: format(value) });
+  const resetBtn = el('button', {
+    type: 'button',
+    class: `slider-reset-link ${Math.abs(value - defaultValue) < step * 0.5 ? 'is-hidden' : ''}`,
+    text: 'Default',
+  });
+
+  const input = el('input', {
+    type: 'range',
+    id,
+    class: 'pro-slider',
+    min: String(min),
+    max: String(max),
+    step: String(step),
+    value: String(value),
+  });
+  updateRangeTrackFill(input);
+
+  const applyNewVal = (rawNum) => {
+    input.value = String(rawNum);
+    updateRangeTrackFill(input);
+    readout.textContent = format(rawNum);
+    resetBtn.classList.toggle('is-hidden', Math.abs(rawNum - defaultValue) < step * 0.5);
+    setDirtyState(true);
+    onChange(rawNum);
+    if (livePreview) {
+      scheduleLiveAppearancePreview();
+    }
+  };
+
+  input.addEventListener('input', (e) => {
+    applyNewVal(Number(e.target.value));
+  });
+
+  resetBtn.addEventListener('click', () => {
+    applyNewVal(defaultValue);
+  });
+
+  return el('div', { class: 'slider-row' }, [
+    el('div', { class: 'slider-header' }, [
+      el('div', { class: 'row-info' }, [
+        el('div', { class: 'row-title', text: title }),
+        desc ? el('div', { class: 'row-desc', text: desc }) : null,
+      ]),
+      el('div', { class: 'slider-right' }, [resetBtn, readout]),
+    ]),
+    el('div', { class: 'slider-track-wrap' }, [
+      el('span', { class: 'slider-bound', text: minLabel || format(min) }),
+      input,
+      el('span', { class: 'slider-bound is-max', text: maxLabel || format(max) }),
+    ]),
+  ]);
+}
+
+function renderNav() {
   const nav = document.getElementById('settings-nav');
-  clear(nav);
-  for (const s of SECTIONS) {
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  const titleEl = document.getElementById('section-title');
+  const subEl = document.getElementById('section-subtitle');
+
+  for (const sec of SECTIONS) {
+    const active = sec.id === activeSection;
+    if (active) {
+      if (titleEl) titleEl.textContent = sec.label;
+      if (subEl) subEl.textContent = sec.subtitle;
+    }
+
+    const iconWrap = el('span', { class: 'nav-item-icon' });
+    iconWrap.innerHTML = sec.icon;
+
     nav.appendChild(
       el('button', {
-        class: `sidebar-item ${activeSection === s.id ? 'active' : ''}`,
+        type: 'button',
+        class: `nav-item ${active ? 'is-active' : ''}`,
         onClick: () => {
-          activeSection = s.id;
-          renderSidebar();
+          activeSection = sec.id;
+          renderNav();
           renderSection();
         },
-      }, [icon(s.icon, 15), el('span', { text: s.label })])
+      }, [iconWrap, el('span', { text: sec.label })])
     );
   }
 }
 
-function renderSection() {
-  if (!config) return;
-  const meta = SECTIONS.find((s) => s.id === activeSection) || SECTIONS[0];
-  document.getElementById('settings-title').textContent = meta.label;
-  document.getElementById('settings-desc').textContent = meta.desc;
-  document.body.setAttribute('data-theme', config.appearance.theme);
-  document.documentElement.style.setProperty('--accent', config.appearance.accent_color);
+function renderAppearanceSection(container) {
+  const ap = config.appearance;
 
-  const container = document.getElementById('settings-content');
-  clear(container);
-
-  if (activeSection === 'appearance') {
-    const themes = [
-      { id: 'obsidian', label: 'Obsidian', color: '#141926' },
-      { id: 'aurora', label: 'Aurora', color: '#133138' },
-      { id: 'midnight', label: 'Midnight', color: '#15122b' },
-      { id: 'crimson', label: 'Crimson', color: '#2b121b' },
-      { id: 'frosted', label: 'Frosted', color: '#2b3347' },
-    ];
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Theme & Accent' }),
-        el('div', { class: 'theme-grid' }, themes.map((t) =>
-          el('button', {
-            class: `theme-chip ${config.appearance.theme === t.id ? 'active' : ''}`,
-            onClick: () => {
-              config.appearance.theme = t.id;
-              markDirty();
-              renderSection();
-            },
-          }, [
-            el('span', { class: 'theme-swatch', style: { background: t.color } }),
-            el('span', { text: t.label }),
-          ])
-        )),
-        row('Accent Color', 'Primary highlight and progress indicator color.', [
-          el('input', {
-            type: 'color',
-            value: config.appearance.accent_color,
-            onInput: (e) => {
-              config.appearance.accent_color = e.target.value;
-              markDirty();
-              document.documentElement.style.setProperty('--accent', e.target.value);
-            },
-          }),
-          el('span', { class: 'muted', text: config.appearance.accent_color }),
+  // Live capsule preview
+  container.appendChild(
+    el('div', { class: 'preview-stage' }, [
+      el('div', { class: 'preview-capsule', id: 'preview-capsule' }, [
+        el('div', { class: 'preview-capsule-left' }, [
+          el('span', { class: 'preview-dot' }),
+          el('span', { class: 'preview-title', id: 'preview-title', text: 'PILLVYN · Ready' }),
         ]),
-        row('Glass Opacity', 'Translucency of the floating Dynamic Island capsule.', [
-          el('input', {
-            type: 'range',
-            class: 'range-slider',
-            min: '45',
-            max: '98',
-            value: String(Math.round(config.appearance.opacity * 100)),
-            onInput: (e) => {
-              config.appearance.opacity = Number(e.target.value) / 100;
-              markDirty();
-            },
-          }),
-          el('span', { class: 'card-value', text: `${Math.round(config.appearance.opacity * 100)}%` }),
-        ]),
-      ])
-    );
+        el('span', { class: 'preview-badge', id: 'preview-badge', text: getThemePreset(ap.theme).name }),
+      ]),
+      el('div', { class: 'preview-caption', id: 'preview-caption' }),
+    ])
+  );
 
-    const monitorOpts = [
-      el('option', { value: '', selected: !config.appearance.monitor_name ? 'selected' : null, text: 'Primary Monitor (Auto)' }),
-      ...monitors.map((m) =>
-        el('option', {
-          value: m.name,
-          selected: config.appearance.monitor_name === m.name ? 'selected' : null,
-          text: `${m.name} (${m.width}×${m.height} @ ${Math.round(m.scale_factor * 100)}%)`,
-        })
+  // Theme selector card
+  const themeGrid = el('div', { class: 'theme-grid' }, THEME_PRESETS.map((preset) => {
+    const selected = ap.theme === preset.id;
+    return el('button', {
+      type: 'button',
+      class: `theme-swatch-card ${selected ? 'is-selected' : ''}`,
+      onClick: () => {
+        ap.theme = preset.id;
+        ap.accent_color = preset.accent;
+        setDirtyState(true);
+        scheduleLiveAppearancePreview();
+        renderSection();
+      },
+    }, [
+      el('div', { class: 'theme-chip', style: { background: preset.surface } }, [
+        el('span', { class: 'theme-chip-pill', style: { background: preset.accent } }),
+      ]),
+      el('div', { class: 'theme-card-name', text: preset.name }),
+      el('div', { class: 'theme-card-desc', text: preset.desc }),
+    ]);
+  }));
+
+  const currentHex = normalizeHexColor(ap.accent_color);
+  const hexSpan = el('span', { class: 'hex-code', id: 'accent-hex-readout', text: currentHex.toUpperCase() });
+  const colorInput = el('input', {
+    type: 'color',
+    id: 'accent-color-input',
+    value: currentHex,
+    onInput: (e) => {
+      const nextHex = normalizeHexColor(e.target.value, currentHex);
+      ap.accent_color = nextHex;
+      hexSpan.textContent = nextHex.toUpperCase();
+      document.querySelectorAll('.accent-dot-btn').forEach((btn) => {
+        btn.classList.toggle('is-selected', btn.dataset.hex === nextHex);
+      });
+      setDirtyState(true);
+      scheduleLiveAppearancePreview();
+    },
+  });
+
+  const dotWrap = el('div', { class: 'accent-controls' }, [
+    ...QUICK_ACCENTS.map((hex) =>
+      el('button', {
+        type: 'button',
+        class: `accent-dot-btn ${currentHex === hex ? 'is-selected' : ''}`,
+        'data-hex': hex,
+        title: hex.toUpperCase(),
+        style: { background: hex },
+        onClick: () => {
+          ap.accent_color = hex;
+          colorInput.value = hex;
+          hexSpan.textContent = hex.toUpperCase();
+          document.querySelectorAll('.accent-dot-btn').forEach((b) => {
+            b.classList.toggle('is-selected', b.dataset.hex === hex);
+          });
+          setDirtyState(true);
+          scheduleLiveAppearancePreview();
+        },
+      })
+    ),
+    el('label', { class: 'color-picker-wrap', title: 'Custom accent color' }, [colorInput, hexSpan]),
+  ]);
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Theme & Accent' }),
+        el('span', { text: 'Applies to Island, Settings, and Tray Menu' }),
+      ]),
+      themeGrid,
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Accent Color' }),
+          el('div', { class: 'row-desc', text: 'Highlights active switches, progress bars, and sliders across all themes.' }),
+        ]),
+        dotWrap,
+      ]),
+    ])
+  );
+
+  // Dimensions & Glass sliders
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Glass & Proportions' }),
+        el('span', { text: 'Drag sliders to preview live' }),
+      ]),
+      sliderField({
+        id: 'slider-opacity',
+        title: 'Glass Opacity',
+        desc: 'Adjust how translucent or solid the dark glass surface appears.',
+        value: Number(ap.opacity ?? 0.88),
+        min: 0.45,
+        max: 0.98,
+        step: 0.01,
+        defaultValue: 0.90,
+        format: (v) => `${Math.round(v * 100)}%`,
+        onChange: (v) => {
+          ap.opacity = Number(v.toFixed(2));
+        },
+        livePreview: true,
+      }),
+      sliderField({
+        id: 'slider-scale',
+        title: 'Interface Scale',
+        desc: 'Resize the entire Dynamic Island proportionally for your screen.',
+        value: Number(ap.scale ?? 1.0),
+        min: 0.80,
+        max: 1.35,
+        step: 0.05,
+        defaultValue: 1.0,
+        format: (v) => `${Math.round(v * 100)}%`,
+        onChange: (v) => {
+          ap.scale = Number(v.toFixed(2));
+        },
+        livePreview: true,
+      }),
+      sliderField({
+        id: 'slider-compact-width',
+        title: 'Compact Width',
+        desc: 'Width of the floating capsule while idling at the top edge.',
+        value: Number(ap.compact_width ?? 268),
+        min: 210,
+        max: 380,
+        step: 2,
+        defaultValue: 268,
+        format: (v) => `${Math.round(v)}px`,
+        onChange: (v) => {
+          ap.compact_width = Math.round(v);
+        },
+        livePreview: true,
+      }),
+    ])
+  );
+
+  updateLivePreviewBox();
+}
+
+function renderBehaviorSection(container) {
+  const ap = config.appearance;
+
+  const monitorSelect = el('select', {
+    class: 'select-field',
+    id: 'select-monitor',
+    onChange: (e) => {
+      ap.monitor_name = e.target.value || null;
+      setDirtyState(true);
+      scheduleLiveAppearancePreview();
+    },
+  }, [
+    el('option', { value: '', text: 'Auto (Primary Display)' }),
+    ...monitors.map((m) =>
+      el('option', {
+        value: m.name,
+        text: `${m.name} (${m.width}×${m.height})${m.is_primary ? ' · Primary' : ''}`,
+      })
+    ),
+  ]);
+  monitorSelect.value = ap.monitor_name || '';
+
+  const autoCollapseSelect = el('select', {
+    class: 'select-field',
+    id: 'select-autocollapse',
+    onChange: (e) => {
+      ap.auto_collapse_ms = Number(e.target.value);
+      setDirtyState(true);
+    },
+  }, [
+    el('option', { value: '0', text: 'Manual / Click Outside Only' }),
+    el('option', { value: '4000', text: 'After 4 seconds idle' }),
+    el('option', { value: '8000', text: 'After 8 seconds idle' }),
+    el('option', { value: '15000', text: 'After 15 seconds idle' }),
+    el('option', { value: '30000', text: 'After 30 seconds idle' }),
+  ]);
+  autoCollapseSelect.value = String(ap.auto_collapse_ms || 0);
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Screen Position' }),
+        el('span', { text: 'Live moves on active display' }),
+      ]),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Target Monitor' }),
+          el('div', { class: 'row-desc', text: 'Select which monitor displays the floating Dynamic Island.' }),
+        ]),
+        monitorSelect,
+      ]),
+      sliderField({
+        id: 'slider-top-offset',
+        title: 'Top Edge Distance',
+        desc: 'Space between the top screen edge and the top of the capsule.',
+        value: Number(ap.top_offset ?? 10),
+        min: 0,
+        max: 120,
+        step: 1,
+        defaultValue: 10,
+        format: (v) => `${Math.round(v)}px`,
+        onChange: (v) => {
+          ap.top_offset = Math.round(v);
+        },
+        livePreview: true,
+      }),
+      sliderField({
+        id: 'slider-x-offset',
+        title: 'Horizontal Position',
+        desc: 'Shift left or right from screen center (0px = perfectly centered).',
+        value: Number(ap.x_offset ?? 0),
+        min: -600,
+        max: 600,
+        step: 10,
+        defaultValue: 0,
+        format: (v) => `${v > 0 ? '+' : ''}${Math.round(v)}px`,
+        onChange: (v) => {
+          ap.x_offset = Math.round(v);
+        },
+        livePreview: true,
+      }),
+    ])
+  );
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Gestures & Behavior' }),
+        el('span', { text: 'Keep interactions effortless and distraction-free' }),
+      ]),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Auto-Collapse Expanded Hub' }),
+          el('div', { class: 'row-desc', text: 'Automatically return to compact mode when not pinned or hovered.' }),
+        ]),
+        autoCollapseSelect,
+      ]),
+      toggleRow(
+        'Minimal Idle Capsule',
+        'Show only the active track or alert in compact mode to avoid screen clutter.',
+        ap.minimal_idle !== false,
+        (v) => { ap.minimal_idle = v; }
       ),
-    ];
+      toggleRow(
+        'Hover Quick-Peek',
+        'Reveal playback controls or expand hint softly when hovering compact mode.',
+        ap.hover_peek !== false,
+        (v) => { ap.hover_peek = v; }
+      ),
+      toggleRow(
+        'Auto-Expand on Hover',
+        'Open the full panel immediately on hover instead of waiting for a click.',
+        ap.hover_expand,
+        (v) => { ap.hover_expand = v; }
+      ),
+      toggleRow(
+        'Click Outside to Collapse',
+        'Clicking anywhere outside the expanded capsule closes it automatically.',
+        ap.click_outside_dismiss !== false,
+        (v) => { ap.click_outside_dismiss = v; }
+      ),
+      toggleRow(
+        'Volume & Brightness Popups',
+        'Briefly display changes in the capsule when using media or brightness keys.',
+        ap.show_volume_hud !== false,
+        (v) => { ap.show_volume_hud = v; }
+      ),
+      toggleRow(
+        'Reduced Motion',
+        'Use calm fades instead of spring resize transitions.',
+        ap.reduced_motion,
+        (v) => {
+          ap.reduced_motion = v;
+          scheduleLiveAppearancePreview();
+        }
+      ),
+    ])
+  );
+}
 
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Size, Placement & Behavior' }),
-        row('Target Monitor', 'Supports multi-monitor and mixed Windows DPI scaling.', [
-          el('select', {
-            class: 'select-glass',
-            onChange: (e) => {
-              config.appearance.monitor_name = e.target.value || null;
-              markDirty();
-            },
-          }, monitorOpts),
-        ]),
-        row('Scale Factor', 'Scale the Dynamic Island UI cleanly on any screen.', [
-          el('input', {
-            type: 'range',
-            class: 'range-slider',
-            min: '80',
-            max: '135',
-            value: String(Math.round(config.appearance.scale * 100)),
-            onInput: (e) => {
-              config.appearance.scale = Number(e.target.value) / 100;
-              markDirty();
-            },
-          }),
-          el('span', { class: 'card-value', text: `${Math.round(config.appearance.scale * 100)}%` }),
-        ]),
-        row('Compact Width (px)', 'Width of the idle Dynamic Island capsule.', [
-          el('input', {
-            type: 'range',
-            class: 'range-slider',
-            min: '210',
-            max: '380',
-            value: String(config.appearance.compact_width),
-            onInput: (e) => {
-              config.appearance.compact_width = Number(e.target.value);
-              markDirty();
-            },
-          }),
-          el('span', { class: 'card-value', text: `${config.appearance.compact_width}px` }),
-        ]),
-        row('Top Offset (px)', 'Distance from the top edge of the selected display.', [
-          el('input', {
-            type: 'number',
-            class: 'input-glass',
-            min: '0',
-            max: '120',
-            value: String(config.appearance.top_offset),
-            onInput: (e) => {
-              config.appearance.top_offset = Number(e.target.value) || 0;
-              markDirty();
-            },
-          }),
-        ]),
-        row('Minimal Idle Capsule', 'Keep the resting capsule clean and unobtrusive until hovering or playing.', toggleSwitch(config.appearance.minimal_idle !== false, (v) => { config.appearance.minimal_idle = v; })),
-        row('Hover-to-Peek Controls', 'Reveal inline play, pause, and skip controls when hovering the compact capsule.', toggleSwitch(config.appearance.hover_peek !== false, (v) => { config.appearance.hover_peek = v; })),
-        row('Hover to Expand', 'Automatically expand when the pointer rests over the capsule.', toggleSwitch(config.appearance.hover_expand, (v) => { config.appearance.hover_expand = v; })),
-        row('Click Outside to Collapse', 'Dismiss the expanded hub when clicking outside the island unless pinned.', toggleSwitch(config.appearance.click_outside_dismiss !== false, (v) => { config.appearance.click_outside_dismiss = v; })),
-        row('External Audio HUD Flash', 'Briefly surface volume, mute, or output changes triggered by hardware keys.', toggleSwitch(config.appearance.show_volume_hud !== false, (v) => { config.appearance.show_volume_hud = v; })),
-        row('Reduced Motion', 'Minimize spring animations for accessibility or low power.', toggleSwitch(config.appearance.reduced_motion, (v) => { config.appearance.reduced_motion = v; })),
-      ])
-    );
-  } else if (activeSection === 'modules') {
-    const labels = [
-      ['music', 'Music Player', 'Windows GSMTC playback & album artwork'],
-      ['notifications', 'Notifications', 'Priority alert hub and history'],
-      ['system', 'System Controls', 'WASAPI volume, mic, audio devices, brightness, battery'],
-      ['hardware', 'Hardware Monitor', 'CPU, RAM, GPU (NVML/DXGI/PDH), and Disk usage'],
-      ['gaming', 'Gaming Mode', 'Active game detection, Steam integration & focus'],
-      ['downloads', 'Download Monitor', 'Browser (.crdownload/.part) and Steam download progress'],
-      ['clipboard', 'Clipboard Manager', 'Event-driven text and image clipboard history'],
-      ['network', 'Network Monitor', 'Adapter Rx/Tx speed, ICMP ping, and VPN status'],
-      ['actions', 'Quick Actions', 'Windows system tools and custom shortcuts'],
-      ['widgets', 'Widgets', 'Clock, timers, stopwatch, and cached weather'],
-      ['plugins', 'Plugins Drawer', 'Local manifest plugins and custom Live Activities'],
-      ['ai', 'Optional AI Assistant', 'Opt-in local Ollama or OpenAI-compatible assistant'],
-    ];
+function renderModulesSection(container) {
+  const mods = config.modules;
 
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Active Island Modules' }),
-        ...labels.map(([k, title, desc]) =>
-          row(title, desc, toggleSwitch(Boolean(config.modules[k]), (v) => {
-            config.modules[k] = v;
-          }))
-        ),
-      ])
-    );
-  } else if (activeSection === 'shortcuts') {
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Startup & Global Hotkeys' }),
-        row('Launch on Windows Startup', 'Start PILLVYN automatically when signing into Windows.', toggleSwitch(config.autostart, (v) => { config.autostart = v; })),
-        row('Expand / Collapse Hotkey', 'Global shortcut anywhere in Windows (e.g. Alt+Shift+Space).', [
-          el('input', {
-            class: 'input-glass',
-            value: config.hotkeys.toggle_expand,
-            onInput: (e) => { config.hotkeys.toggle_expand = e.target.value; markDirty(); },
-          }),
-        ]),
-        row('Show / Hide Island Hotkey', 'Toggle island visibility.', [
-          el('input', {
-            class: 'input-glass',
-            value: config.hotkeys.toggle_visibility,
-            onInput: (e) => { config.hotkeys.toggle_visibility = e.target.value; markDirty(); },
-          }),
-        ]),
-        row('Do Not Disturb Hotkey', 'Mute non-critical alerts globally.', [
-          el('input', {
-            class: 'input-glass',
-            value: config.hotkeys.toggle_dnd,
-            onInput: (e) => { config.hotkeys.toggle_dnd = e.target.value; markDirty(); },
-          }),
-        ]),
-        row('Clipboard Drawer Hotkey', 'Jump straight to clipboard history.', [
-          el('input', {
-            class: 'input-glass',
-            value: config.hotkeys.clipboard_drawer,
-            onInput: (e) => { config.hotkeys.clipboard_drawer = e.target.value; markDirty(); },
-          }),
-        ]),
-      ])
-    );
+  const grid = el('div', { class: 'module-grid' }, MODULE_META.map(([key, label, desc]) => {
+    const isAi = key === 'ai';
+    const checked = isAi ? (mods.ai !== false && config.ai.enabled) : Boolean(mods[key]);
+    const input = el('input', { type: 'checkbox' });
+    input.checked = checked;
+    input.addEventListener('change', (e) => {
+      const next = Boolean(e.target.checked);
+      mods[key] = next;
+      if (isAi) {
+        config.ai.enabled = next;
+      }
+      setDirtyState(true);
+      if (isAi) {
+        renderSection();
+      }
+    });
 
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Automatic Application Profiles' }),
-        ...config.profiles.map((p, idx) =>
-          row(p.name, `Triggers when ${p.process_name} is in foreground`, [
-            el('input', {
-              class: 'input-glass',
-              style: { width: '130px' },
-              value: p.process_name,
-              onInput: (e) => { config.profiles[idx].process_name = e.target.value; markDirty(); },
-            }),
-            toggleSwitch(p.dnd, (v) => { config.profiles[idx].dnd = v; }),
-          ])
-        ),
-      ])
-    );
-  } else if (activeSection === 'gaming') {
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Gaming Mode' }),
-        row('Auto Game Detection', 'Detect Steam RunningAppID, known games, and fullscreen apps.', toggleSwitch(config.gaming.auto_detect, (v) => { config.gaming.auto_detect = v; })),
-        row('Suppress Notifications in Game', 'Automatically mute non-critical banners while gaming.', toggleSwitch(config.gaming.suppress_notifications, (v) => { config.gaming.suppress_notifications = v; })),
-        row('Click-Through HUD in Game', 'Ignore mouse clicks on the island during active games.', toggleSwitch(config.gaming.click_through_hud, (v) => { config.gaming.click_through_hud = v; })),
-        row('Custom Game Executables', 'Comma-separated process names (e.g. mygame.exe).', [
-          el('input', {
-            class: 'input-glass',
-            value: (config.gaming.custom_processes || []).join(', '),
-            onInput: (e) => {
-              config.gaming.custom_processes = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
-              markDirty();
-            },
-          }),
-        ]),
-      ])
-    );
+    return el('div', { class: 'module-tile' }, [
+      el('div', { class: 'row-info' }, [
+        el('div', { class: 'row-title', text: label }),
+        el('div', { class: 'row-desc', text: desc }),
+      ]),
+      el('label', { class: 'switch' }, [input, el('span', { class: 'switch-track' })]),
+    ]);
+  }));
 
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Widgets & Weather' }),
-        row('Weather Integration', 'Fetch local weather via Open-Meteo with offline cache.', toggleSwitch(config.widgets.weather_enabled, (v) => { config.widgets.weather_enabled = v; })),
-        row('Weather City', 'Leave "Auto (Local)" or type any city (e.g. London, Tokyo).', [
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Enabled Modules' }),
+        el('span', { text: 'Turn off unused tabs to keep your Island minimal' }),
+      ]),
+      grid,
+    ])
+  );
+
+  // Weather & Gaming preferences
+  const unitSelect = el('select', {
+    class: 'select-field',
+    onChange: (e) => {
+      config.widgets.temperature_unit = e.target.value;
+      setDirtyState(true);
+    },
+  }, [
+    el('option', { value: 'C', text: 'Celsius (°C)' }),
+    el('option', { value: 'F', text: 'Fahrenheit (°F)' }),
+  ]);
+  unitSelect.value = config.widgets.temperature_unit || 'C';
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Clock, Weather & Gaming' }),
+        el('span', { text: 'Fine-tune widgets and automatic game detection' }),
+      ]),
+      toggleRow(
+        '24-Hour Clock Format',
+        'Use 24-hour time in the compact pill and clock widget (turn off for AM/PM).',
+        config.widgets.clock_24h !== false,
+        (v) => { config.widgets.clock_24h = v; }
+      ),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Weather City' }),
+          el('div', { class: 'row-desc', text: 'Used with Open-Meteo when weather widget is active.' }),
+        ]),
+        el('div', { class: 'row-control' }, [
           el('input', {
-            class: 'input-glass',
-            value: config.widgets.weather_city,
+            class: 'input-field',
+            value: config.widgets.weather_city || '',
+            placeholder: 'e.g. London, Tokyo',
             onInput: (e) => {
               config.widgets.weather_city = e.target.value;
-              config.widgets.weather_lat = null;
-              config.widgets.weather_lon = null;
-              markDirty();
+              setDirtyState(true);
+            },
+          }),
+          unitSelect,
+        ]),
+      ]),
+      toggleRow(
+        'Auto-Detect Fullscreen Games',
+        'Switch to Gaming Focus activity when a known or custom game runs.',
+        config.gaming.auto_detect,
+        (v) => { config.gaming.auto_detect = v; }
+      ),
+      toggleRow(
+        'Click-Through HUD While Gaming',
+        'Prevent accidental mouse captures over the Island during gameplay.',
+        config.gaming.click_through_hud,
+        (v) => { config.gaming.click_through_hud = v; }
+      ),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Custom Game Executables' }),
+          el('div', { class: 'row-desc', text: 'Comma-separated process names (e.g. mygame.exe, rocket.exe).' }),
+        ]),
+        el('input', {
+          class: 'input-field',
+          style: { width: '240px' },
+          value: (config.gaming.custom_processes || []).join(', '),
+          placeholder: 'game.exe, client.exe',
+          onInput: (e) => {
+            config.gaming.custom_processes = e.target.value
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            setDirtyState(true);
+          },
+        }),
+      ]),
+    ])
+  );
+
+  // Performance + AI section
+  const aiEnabled = mods.ai !== false && config.ai.enabled;
+  const perfAndAi = [
+    el('div', { class: 'card-heading' }, [
+      el('h2', { text: 'Performance & AI Engine' }),
+      el('span', { text: 'Low-CPU background polling and local LLM settings' }),
+    ]),
+    sliderField({
+      id: 'slider-hw-interval',
+      title: 'Telemetry Refresh Interval',
+      desc: 'Higher values reduce background CPU usage; battery mode doubles this automatically.',
+      value: Number(config.performance.hardware_interval_ms ?? 2500),
+      min: 1000,
+      max: 10000,
+      step: 500,
+      defaultValue: 2500,
+      format: (v) => `${(v / 1000).toFixed(1)}s`,
+      onChange: (v) => {
+        config.performance.hardware_interval_ms = Math.round(v);
+        config.performance.network_interval_ms = Math.round(v);
+      },
+    }),
+    toggleRow(
+      'Battery Saver Polling',
+      'Reduce sensor refresh frequency automatically when running on battery.',
+      config.performance.low_power_on_battery,
+      (v) => { config.performance.low_power_on_battery = v; }
+    ),
+  ];
+
+  if (aiEnabled) {
+    const providerSelect = el('select', {
+      class: 'select-field',
+      onChange: (e) => {
+        config.ai.provider = e.target.value;
+        setDirtyState(true);
+      },
+    }, [
+      el('option', { value: 'ollama', text: 'Ollama (Local)' }),
+      el('option', { value: 'openai_compatible', text: 'OpenAI-Compatible Endpoint' }),
+    ]);
+    providerSelect.value = config.ai.provider || 'ollama';
+
+    perfAndAi.push(
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'AI Provider & Model' }),
+          el('div', { class: 'row-desc', text: 'Local Ollama runs privately without API keys.' }),
+        ]),
+        el('div', { class: 'row-control' }, [
+          providerSelect,
+          el('input', {
+            class: 'input-field',
+            style: { width: '130px' },
+            value: config.ai.model || 'llama3.2',
+            placeholder: 'Model name',
+            onInput: (e) => {
+              config.ai.model = e.target.value;
+              setDirtyState(true);
             },
           }),
         ]),
-        row('Temperature Unit', 'Celsius or Fahrenheit display.', [
-          el('select', {
-            class: 'select-glass',
-            onChange: (e) => { config.widgets.temperature_unit = e.target.value; markDirty(); },
-          }, [
-            el('option', { value: 'C', selected: config.widgets.temperature_unit === 'C' ? 'selected' : null, text: 'Celsius (°C)' }),
-            el('option', { value: 'F', selected: config.widgets.temperature_unit === 'F' ? 'selected' : null, text: 'Fahrenheit (°F)' }),
-          ]),
+      ]),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'AI Endpoint URL' }),
+          el('div', { class: 'row-desc', text: 'Default Ollama endpoint: http://127.0.0.1:11434' }),
         ]),
-        row('24-Hour Clock', 'Use 24-hour format on capsule and widgets.', toggleSwitch(config.widgets.clock_24h, (v) => { config.widgets.clock_24h = v; })),
+        el('input', {
+          class: 'input-field',
+          style: { width: '250px' },
+          value: config.ai.endpoint || 'http://127.0.0.1:11434',
+          onInput: (e) => {
+            config.ai.endpoint = e.target.value;
+            setDirtyState(true);
+          },
+        }),
       ])
     );
-  } else if (activeSection === 'privacy') {
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Privacy & Performance' }),
-        row('Clipboard History Capture', 'Listen to clipboard updates for quick recall.', toggleSwitch(config.privacy.clipboard_enabled, (v) => { config.privacy.clipboard_enabled = v; })),
-        row('Skip Sensitive Tokens', 'Skip strings matching API keys, GitHub tokens, and private keys.', toggleSwitch(config.privacy.clipboard_skip_sensitive, (v) => { config.privacy.clipboard_skip_sensitive = v; })),
-        row('Low-Power Battery Mode', 'Double telemetry sampling intervals when running on battery.', toggleSwitch(config.performance.low_power_on_battery, (v) => { config.performance.low_power_on_battery = v; })),
-        row('Telemetry Interval (ms)', 'Balance responsiveness vs CPU usage (1000–10000 ms).', [
-          el('input', {
-            type: 'number',
-            class: 'input-glass',
-            min: '1000',
-            max: '10000',
-            step: '250',
-            value: String(config.performance.hardware_interval_ms),
-            onInput: (e) => { config.performance.hardware_interval_ms = Number(e.target.value) || 2000; markDirty(); },
-          }),
-        ]),
-      ])
-    );
+  }
 
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Updates (Consent Required)' }),
-        row('Allow Update Checks', 'Only contact GitHub Releases API when you opt in.', toggleSwitch(config.privacy.update_check_consent, (v) => { config.privacy.update_check_consent = v; })),
-        row('GitHub Release Repository', 'Format: owner/repo', [
-          el('input', {
-            class: 'input-glass',
-            value: config.privacy.update_repo,
-            onInput: (e) => { config.privacy.update_repo = e.target.value; markDirty(); },
-          }),
+  container.appendChild(el('div', { class: 'setting-card' }, perfAndAi));
+}
+
+function buildComboFromKeyEvent(e) {
+  const ignoreOnly = ['Control', 'Shift', 'Alt', 'Meta', 'OS'];
+  if (ignoreOnly.includes(e.key)) return null;
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (parts.length === 0) return null; // require at least one modifier for global hotkeys
+  let keyName = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  parts.push(keyName);
+  return parts.join('+');
+}
+
+function renderShortcutsSection(container) {
+  const hotkeysMeta = [
+    ['toggle_expand', 'Expand / Collapse Island', 'Toggle compact and full workspace view'],
+    ['toggle_visibility', 'Show / Hide Island', 'Completely hide or restore the floating capsule'],
+    ['toggle_dnd', 'Do Not Disturb', 'Mute non-critical alerts with a quick banner'],
+    ['clipboard_drawer', 'Open Clipboard Drawer', 'Jump straight to recent clipboard items'],
+  ];
+
+  const hkRows = hotkeysMeta.map(([key, label, desc]) => {
+    const isRecording = recordingHotkeyKey === key;
+    const input = el('input', {
+      class: 'input-field hotkey-input',
+      value: config.hotkeys[key] || '',
+      placeholder: 'Not assigned',
+      onInput: (e) => {
+        config.hotkeys[key] = e.target.value;
+        setDirtyState(true);
+      },
+    });
+    const recBtn = el('button', {
+      type: 'button',
+      class: `btn-record ${isRecording ? 'is-recording' : ''}`,
+      text: isRecording ? 'Press Keys…' : 'Record',
+      onClick: () => {
+        recordingHotkeyKey = isRecording ? null : key;
+        renderSection();
+      },
+    });
+    const clearBtn = el('button', {
+      type: 'button',
+      class: 'btn-mini',
+      text: 'Clear',
+      onClick: () => {
+        config.hotkeys[key] = '';
+        recordingHotkeyKey = null;
+        setDirtyState(true);
+        renderSection();
+      },
+    });
+
+    return el('div', { class: 'setting-row' }, [
+      el('div', { class: 'row-info' }, [
+        el('div', { class: 'row-title', text: label }),
+        el('div', { class: 'row-desc', text: desc }),
+      ]),
+      el('div', { class: 'row-control' }, [input, recBtn, clearBtn]),
+    ]);
+  });
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Global Keyboard Shortcuts' }),
+        el('span', { text: 'Click Record and press modifier + key (or type e.g. Alt+Shift+Space)' }),
+      ]),
+      ...hkRows,
+    ])
+  );
+
+  // App Rules (Profiles) CRUD
+  const profileRows = (config.profiles || []).map((prof, idx) =>
+    el('div', { class: 'list-item-row' }, [
+      el('div', { class: 'list-item-meta' }, [
+        el('div', { class: 'list-item-title', text: `${prof.name} (${prof.process_name})` }),
+        el('div', {
+          class: 'list-item-sub',
+          text: `${prof.dnd ? 'Auto DND On' : 'Alerts Active'}${prof.active_tab ? ` · Opens: ${prof.active_tab}` : ''}`,
+        }),
+      ]),
+      el('button', {
+        type: 'button',
+        class: 'btn-delete',
+        onClick: () => {
+          config.profiles.splice(idx, 1);
+          setDirtyState(true);
+          renderSection();
+        },
+      }, 'Remove'),
+    ])
+  );
+
+  const profNameIn = el('input', { class: 'input-field', placeholder: 'Rule name (e.g. Meet)', style: { flex: '1', minWidth: '120px' } });
+  const profExeIn = el('input', { class: 'input-field', placeholder: 'Process (e.g. zoom.exe)', style: { flex: '1', minWidth: '135px' } });
+  const profTabSelect = el('select', { class: 'select-field' }, TAB_CHOICES.map(([val, lbl]) => el('option', { value: val, text: lbl })));
+  const profDndCheck = el('input', { type: 'checkbox' });
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Per-App Rules & Profiles' }),
+        el('span', { text: 'Automatically mute alerts or switch tabs when an app gains focus' }),
+      ]),
+      ...(profileRows.length ? profileRows : [el('div', { class: 'row-desc', text: 'No application rules configured.' })]),
+      el('div', { class: 'inline-add-form' }, [
+        profNameIn,
+        profExeIn,
+        profTabSelect,
+        el('label', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-2)' } }, [
+          profDndCheck,
+          'Auto DND',
         ]),
-        row('Check for Updates', `Current version: v${appVersion}`, [
+        el('button', {
+          type: 'button',
+          class: 'btn-secondary',
+          onClick: () => {
+            const name = profNameIn.value.trim();
+            const proc = profExeIn.value.trim();
+            if (!name || !proc) {
+              showBanner('Enter both a profile name and an executable (e.g. code.exe).', 'warn');
+              return;
+            }
+            config.profiles.push({
+              id: `prof-${Date.now()}`,
+              name,
+              process_name: proc.toLowerCase(),
+              dnd: Boolean(profDndCheck.checked),
+              theme_override: null,
+              active_tab: profTabSelect.value || null,
+            });
+            setDirtyState(true);
+            renderSection();
+          },
+        }, 'Add Rule'),
+      ]),
+    ])
+  );
+
+  // Quick Actions CRUD
+  const qaRows = (config.quick_actions || []).map((qa, idx) =>
+    el('div', { class: 'list-item-row' }, [
+      el('div', { class: 'list-item-meta' }, [
+        el('div', { class: 'list-item-title', text: qa.label }),
+        el('div', { class: 'list-item-sub', text: `${qa.kind} · ${qa.target}` }),
+      ]),
+      el('button', {
+        type: 'button',
+        class: 'btn-delete',
+        onClick: () => {
+          config.quick_actions.splice(idx, 1);
+          setDirtyState(true);
+          renderSection();
+        },
+      }, 'Remove'),
+    ])
+  );
+
+  const qaLabelIn = el('input', { class: 'input-field', placeholder: 'Label (e.g. GitHub)', style: { flex: '1', minWidth: '120px' } });
+  const qaTargetIn = el('input', { class: 'input-field', placeholder: 'https://..., ms-settings:..., or wt', style: { flex: '1.5', minWidth: '170px' } });
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Quick Actions' }),
+        el('span', { text: 'Shown in Overview top row and Tools -> Quick Actions' }),
+      ]),
+      ...(qaRows.length ? qaRows : [el('div', { class: 'row-desc', text: 'No quick actions added yet.' })]),
+      el('div', { class: 'inline-add-form' }, [
+        qaLabelIn,
+        qaTargetIn,
+        el('button', {
+          type: 'button',
+          class: 'btn-secondary',
+          onClick: async () => {
+            const label = qaLabelIn.value.trim();
+            const target = qaTargetIn.value.trim();
+            if (!label || !target) {
+              showBanner('Enter both a shortcut label and target command/URL.', 'warn');
+              return;
+            }
+            const kind = target.startsWith('http://') || target.startsWith('https://') || target.startsWith('ms-')
+              ? 'uri'
+              : (target.toLowerCase().endsWith('.exe') && (target.includes('\\') || target.includes('/')))
+                ? 'app'
+                : 'system_tool';
+            try {
+              const cleanTarget = invoke
+                ? await invoke('validate_quick_action_cmd', { kind, target })
+                : target;
+              config.quick_actions.push({
+                id: `qa-${Date.now()}`,
+                label,
+                icon: 'zap',
+                kind,
+                target: cleanTarget,
+              });
+              setDirtyState(true);
+              showBanner('');
+              renderSection();
+            } catch (err) {
+              showBanner(String(err), 'err');
+            }
+          },
+        }, 'Add Shortcut'),
+      ]),
+    ])
+  );
+}
+
+function renderSystemSection(container) {
+  const priv = config.privacy;
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Startup & Focus Modes' }),
+        el('span', { text: 'Also accessible directly from the system tray popup' }),
+      ]),
+      toggleRow(
+        'Launch PILLVYN at Windows Startup',
+        'Start quietly in the top Dynamic Island position when signing in to Windows.',
+        config.autostart,
+        (v) => { config.autostart = v; }
+      ),
+      toggleRow(
+        'Do Not Disturb Mode',
+        'Suppress normal application popups; keep critical hardware and battery warnings.',
+        priv.dnd_mode,
+        (v) => { priv.dnd_mode = v; updateLivePreviewBox(); }
+      ),
+      toggleRow(
+        'Focus Mode',
+        'Keep the capsule calm and minimal while working or presenting.',
+        priv.focus_mode,
+        (v) => { priv.focus_mode = v; updateLivePreviewBox(); }
+      ),
+    ])
+  );
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Clipboard & Privacy' }),
+        el('span', { text: 'History stays local in memory only' }),
+      ]),
+      toggleRow(
+        'Capture Clipboard History',
+        'Allow quick access to recent text and image copies inside the Clip tab.',
+        priv.clipboard_enabled,
+        (v) => { priv.clipboard_enabled = v; }
+      ),
+      toggleRow(
+        'Filter Passwords & API Tokens',
+        'Skip keys, JWTs, bearer headers, and high-entropy secrets automatically.',
+        priv.clipboard_skip_sensitive,
+        (v) => { priv.clipboard_skip_sensitive = v; }
+      ),
+      sliderField({
+        id: 'slider-clipboard-max',
+        title: 'Clipboard Item Limit',
+        desc: 'Maximum number of recent copies retained in memory.',
+        value: Number(priv.clipboard_max_items ?? 35),
+        min: 5,
+        max: 100,
+        step: 5,
+        defaultValue: 35,
+        format: (v) => `${Math.round(v)} items`,
+        onChange: (v) => { priv.clipboard_max_items = Math.round(v); },
+      }),
+    ])
+  );
+
+  // Updates + Plugins folder info
+  const updateBody = el('div', { class: 'list-item-sub', text: `Installed version: v${appVersion} · Repo: ${priv.update_repo || 'EbramJames/PILLVYN'}` });
+  const updateOpenBtn = el('button', {
+    type: 'button',
+    class: 'btn-mini',
+    style: { display: 'none' },
+    text: 'Open Release',
+    onClick: () => {
+      if (updateResult?.release_url && invoke) {
+        invoke('open_url', { url: updateResult.release_url }).catch((e) => showBanner(String(e), 'err'));
+      }
+    },
+  });
+
+  if (updateResult) {
+    updateBody.textContent = updateResult.update_available
+      ? `Update available: v${updateResult.latest_version} (current v${updateResult.current_version})`
+      : `Up to date (v${updateResult.current_version})`;
+    if (updateResult.release_url) {
+      updateOpenBtn.style.display = 'inline-flex';
+    }
+  }
+
+  container.appendChild(
+    el('div', { class: 'setting-card' }, [
+      el('div', { class: 'card-heading' }, [
+        el('h2', { text: 'Updates & Extensions' }),
+        el('span', { text: 'Updates are checked only when requested' }),
+      ]),
+      toggleRow(
+        'Allow Update Checks',
+        'Enable manual GitHub Release checks from Settings Studio.',
+        priv.update_check_consent,
+        (v) => { priv.update_check_consent = v; }
+      ),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'PILLVYN Releases' }),
+          updateBody,
+        ]),
+        el('div', { class: 'row-control' }, [
+          updateOpenBtn,
           el('button', {
-            class: 'pill-btn primary',
+            type: 'button',
+            class: 'btn-secondary',
             onClick: async () => {
+              if (!priv.update_check_consent) {
+                showBanner('Enable "Allow Update Checks" above (or click Save Changes) first.', 'warn');
+                return;
+              }
+              updateBody.textContent = 'Checking GitHub Releases…';
               try {
-                updateStatus = 'Checking GitHub Releases…';
-                renderSection();
-                const res = await invoke('check_updates');
-                updateStatus = res.status_message;
+                updateResult = await invoke('check_updates');
                 renderSection();
               } catch (err) {
-                updateStatus = String(err);
-                renderSection();
+                showBanner(`Update check failed: ${err}`, 'err');
+                updateBody.textContent = `Check failed: ${err}`;
               }
             },
           }, 'Check Now'),
         ]),
-        updateStatus ? el('div', { class: 'notice-banner', text: updateStatus }) : null,
-      ])
-    );
-  } else if (activeSection === 'integrations') {
-    container.appendChild(
-      el('div', { class: 'setting-section' }, [
-        el('h3', { text: 'Optional AI Integration (No Mandatory Paid APIs)' }),
-        row('Enable AI Module', 'Shows the AI tab in the Dynamic Island.', toggleSwitch(config.ai.enabled, (v) => {
-          config.ai.enabled = v;
-          config.modules.ai = v;
-        })),
-        row('AI Provider', 'Local Ollama runs 100% offline with zero API costs.', [
-          el('select', {
-            class: 'select-glass',
-            onChange: (e) => { config.ai.provider = e.target.value; markDirty(); },
-          }, [
-            el('option', { value: 'ollama', selected: config.ai.provider === 'ollama' ? 'selected' : null, text: 'Local Ollama' }),
-            el('option', { value: 'openai_compatible', selected: config.ai.provider === 'openai_compatible' ? 'selected' : null, text: 'OpenAI-Compatible Local/Custom' }),
-          ]),
-        ]),
-        row('Endpoint URL', 'Default Ollama URL: http://127.0.0.1:11434', [
-          el('input', {
-            class: 'input-glass',
-            value: config.ai.endpoint,
-            onInput: (e) => { config.ai.endpoint = e.target.value; markDirty(); },
+      ]),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Installed Plugins' }),
+          el('div', {
+            class: 'row-desc',
+            text: plugins ? `${plugins.plugins.length} plugin(s) in ${plugins.plugins_dir}` : 'Local manifest plugins directory',
           }),
         ]),
-        row('Model Name', 'e.g. llama3.2, qwen2.5, mistral', [
-          el('input', {
-            class: 'input-glass',
-            value: config.ai.model,
-            onInput: (e) => { config.ai.model = e.target.value; markDirty(); },
-          }),
-        ]),
-      ])
-    );
+        el('button', {
+          type: 'button',
+          class: 'btn-secondary',
+          onClick: async () => {
+            try {
+              plugins = await invoke('plugin_action', { action: 'create_sample' });
+              showBanner('Created sample Pomodoro plugin in plugins folder.', 'ok');
+              renderSection();
+            } catch (err) {
+              showBanner(String(err), 'err');
+            }
+          },
+        }, 'Create Sample Plugin'),
+      ]),
+    ])
+  );
+}
+
+function renderSection() {
+  const container = document.getElementById('settings-content');
+  if (!container || !config) return;
+  container.innerHTML = '';
+
+  if (activeSection === 'appearance') renderAppearanceSection(container);
+  else if (activeSection === 'behavior') renderBehaviorSection(container);
+  else if (activeSection === 'modules') renderModulesSection(container);
+  else if (activeSection === 'shortcuts') renderShortcutsSection(container);
+  else if (activeSection === 'system') renderSystemSection(container);
+}
+
+async function handleSave() {
+  if (!config || !invoke) return;
+  const saveBtn = document.getElementById('btn-save');
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    config.modules.ai = Boolean(config.ai.enabled && config.modules.ai);
+    config.ai.enabled = Boolean(config.modules.ai);
+    const outcome = await invoke('save_settings_config', { newConfig: config });
+    config = structuredClone(outcome.config);
+    savedConfig = structuredClone(outcome.config);
+    setDirtyState(false);
+    syncSettingsTheme();
+    renderSection();
+    if (outcome.warnings && outcome.warnings.length > 0) {
+      showBanner(`Saved, with warning: ${outcome.warnings.join(' · ')}`, 'warn');
+    } else {
+      showBanner('Settings saved and synchronized across PILLVYN.', 'ok');
+    }
+  } catch (err) {
+    showBanner(String(err), 'err');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
-document.getElementById('btn-save-settings').addEventListener('click', async () => {
-  if (!config || !invoke) return;
-  try {
-    config = await invoke('save_app_config', { newConfig: config });
-    clearDirty();
-    showToast('Settings saved and applied.');
-    renderSection();
-  } catch (err) {
-    showToast(`Save failed: ${err}`);
+async function handleRevert() {
+  if (!savedConfig) return;
+  config = structuredClone(savedConfig);
+  setDirtyState(false);
+  recordingHotkeyKey = null;
+  if (invoke) {
+    await invoke('cancel_appearance_preview').catch(() => {});
   }
-});
+  syncSettingsTheme();
+  renderSection();
+  showBanner('Reverted unsaved edits back to last saved configuration.', 'ok');
+}
 
-document.getElementById('btn-reset-defaults').addEventListener('click', async () => {
-  if (!invoke) return;
-  try {
-    config = await invoke('save_app_config', { newConfig: { version: 2 } });
-    clearDirty();
-    showToast('Restored default PILLVYN settings.');
-    renderSection();
-  } catch (err) {
-    showToast(`Reset failed: ${err}`);
+async function handleResetDefaults() {
+  const btn = document.getElementById('btn-reset');
+  if (!resetConfirmArmed) {
+    resetConfirmArmed = true;
+    if (btn) {
+      btn.textContent = 'Confirm Reset';
+      btn.classList.add('is-danger-confirm');
+    }
+    clearTimeout(resetConfirmTimer);
+    resetConfirmTimer = setTimeout(() => {
+      resetConfirmArmed = false;
+      if (btn) {
+        btn.textContent = 'Reset Defaults';
+        btn.classList.remove('is-danger-confirm');
+      }
+    }, 3500);
+    return;
   }
-});
+
+  resetConfirmArmed = false;
+  clearTimeout(resetConfirmTimer);
+  if (btn) {
+    btn.textContent = 'Reset Defaults';
+    btn.classList.remove('is-danger-confirm');
+  }
+
+  try {
+    const outcome = await invoke('save_settings_config', { newConfig: { version: 2 } });
+    config = structuredClone(outcome.config);
+    savedConfig = structuredClone(outcome.config);
+    setDirtyState(false);
+    syncSettingsTheme();
+    renderSection();
+    showBanner('All settings restored to factory defaults.', 'ok');
+  } catch (err) {
+    showBanner(String(err), 'err');
+  }
+}
 
 async function init() {
   if (!invoke) return;
-  const initData = await invoke('get_initial_state');
-  config = initData.config;
-  monitors = initData.monitors || [];
-  appVersion = initData.app_version || '1.1.0';
-  document.getElementById('sidebar-version').textContent = `v${appVersion} · Settings Studio`;
+
+  try {
+    const initPayload = await invoke('get_initial_state');
+    savedConfig = structuredClone(initPayload.config);
+    config = structuredClone(initPayload.config);
+    monitors = initPayload.monitors || [];
+    plugins = initPayload.plugins || null;
+    appVersion = initPayload.app_version || '1.2.0';
+    islandVisible = initPayload.island_visible !== false;
+
+    const verEl = document.getElementById('studio-version');
+    if (verEl) verEl.textContent = `Studio · v${appVersion}`;
+
+    syncSettingsTheme();
+    updateSidebarStatus();
+    setDirtyState(false);
+    renderNav();
+    renderSection();
+
+    if (initPayload.config_warnings && initPayload.config_warnings.length > 0) {
+      showBanner(`Startup warning: ${initPayload.config_warnings.join(' · ')}`, 'warn');
+    }
+  } catch (err) {
+    showBanner(`Failed to initialize Settings Studio: ${err}`, 'err');
+  }
+
+  document.getElementById('btn-save')?.addEventListener('click', handleSave);
+  document.getElementById('btn-revert')?.addEventListener('click', handleRevert);
+  document.getElementById('btn-reset')?.addEventListener('click', handleResetDefaults);
+
+  document.getElementById('btn-toggle-island')?.addEventListener('click', async () => {
+    const snap = await invoke('tray_action', { action: 'toggle_visibility' }).catch(() => null);
+    if (snap) {
+      islandVisible = snap.visible;
+      islandExpanded = snap.expanded;
+      updateSidebarStatus();
+    }
+  });
+
+  document.getElementById('btn-expand-island')?.addEventListener('click', async () => {
+    const snap = await invoke('tray_action', { action: 'toggle_expand' }).catch(() => null);
+    if (snap) {
+      islandVisible = snap.visible;
+      islandExpanded = snap.expanded;
+      updateSidebarStatus();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (recordingHotkeyKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        recordingHotkeyKey = null;
+        renderSection();
+        return;
+      }
+      const combo = buildComboFromKeyEvent(e);
+      if (combo) {
+        config.hotkeys[recordingHotkeyKey] = combo;
+        recordingHotkeyKey = null;
+        setDirtyState(true);
+        renderSection();
+      }
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      handleSave();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (dirty && invoke) {
+      invoke('cancel_appearance_preview').catch(() => {});
+    }
+  });
+
+  if (currentWindow?.onCloseRequested) {
+    currentWindow.onCloseRequested(() => {
+      if (dirty && invoke) {
+        invoke('cancel_appearance_preview').catch(() => {});
+      }
+    }).catch(() => {});
+  }
 
   if (listen) {
-    await listen('pillvyn://config', (e) => {
+    listen('pillvyn://config', (e) => {
+      if (!e.payload) return;
+      savedConfig = structuredClone(e.payload);
       if (!dirty) {
-        config = e.payload;
+        config = structuredClone(e.payload);
+        syncSettingsTheme();
         renderSection();
       }
     });
+    listen('pillvyn://island-state', (e) => {
+      if (!e.payload) return;
+      islandVisible = e.payload.visible !== false;
+      islandExpanded = Boolean(e.payload.expanded);
+      updateSidebarStatus();
+    });
   }
-
-  renderSidebar();
-  renderSection();
 }
 
 init();

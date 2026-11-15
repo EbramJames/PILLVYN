@@ -21,7 +21,7 @@ function collectFiles(dir, extFilter) {
   return results;
 }
 
-const required = ['index.html', 'settings.html', 'styles/tokens.css', 'styles/island.css', 'js/main.js'];
+const required = ['index.html', 'settings.html', 'tray.html', 'styles/tokens.css', 'styles/island.css', 'styles/tray.css', 'js/main.js', 'js/tray.js', 'js/theme.js'];
 for (const rel of required) {
   const full = path.join(srcDir, rel);
   if (!fs.existsSync(full)) {

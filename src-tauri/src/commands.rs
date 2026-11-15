@@ -48,6 +48,7 @@ pub struct AppState {
     pub island_pinned: Mutex<bool>,
     pub last_expanded_ms: Mutex<u64>,
     pub last_local_audio_action_ms: Mutex<u64>,
+    pub config_warnings: Mutex<Vec<String>>,
     pub media_notify: Arc<Notify>,
     pub system_notify: Arc<Notify>,
     pub foreground_notify: Arc<Notify>,
@@ -73,6 +74,8 @@ pub struct InitialDashboardPayload {
     pub plugins: PluginsSnapshot,
     pub active_profile: Option<AppProfile>,
     pub island_pinned: bool,
+    pub island_visible: bool,
+    pub config_warnings: Vec<String>,
     pub app_version: String,
 }
 
@@ -141,6 +144,16 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
     let plugins = discover_plugins();
     let active_profile = state.active_profile.lock().ok().and_then(|g| g.clone());
     let island_pinned = state.island_pinned.lock().map(|g| *g).unwrap_or(false);
+    let island_visible = state
+        .window_state
+        .lock()
+        .map(|g| g.is_visible)
+        .unwrap_or(true);
+    let config_warnings = state
+        .config_warnings
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
 
     InitialDashboardPayload {
         config,
@@ -161,6 +174,8 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
         plugins,
         active_profile,
         island_pinned,
+        island_visible,
+        config_warnings,
         app_version: app.package_info().version.to_string(),
     }
 }
@@ -172,6 +187,7 @@ pub fn get_monitors(app: AppHandle) -> Vec<MonitorInfo> {
 
 #[tauri::command]
 pub fn update_island_hitbox(
+    app: AppHandle,
     state: State<'_, AppState>,
     hitbox: HitboxRect,
     expanded: bool,
@@ -186,7 +202,11 @@ pub fn update_island_hitbox(
         };
     }
     let mut became_expanded = false;
+    let mut changed_expanded = false;
     if let Ok(mut exp) = state.island_expanded.lock() {
+        if *exp != expanded {
+            changed_expanded = true;
+        }
         if expanded && !*exp {
             became_expanded = true;
         }
@@ -207,6 +227,9 @@ pub fn update_island_hitbox(
             *t = tab;
         }
     }
+    if changed_expanded {
+        crate::emit_island_state(&app);
+    }
 }
 
 #[tauri::command]
@@ -224,6 +247,7 @@ pub fn save_app_config(
     mut new_config: PillvynConfig,
 ) -> Result<PillvynConfig, String> {
     new_config.sanitize();
+    crate::validate_hotkeys_uniqueness(&new_config)?;
     save_config(&new_config)?;
 
     if let Ok(mut guard) = state.config.lock() {
@@ -242,17 +266,125 @@ pub fn save_app_config(
 
     // Apply Windows autostart setting cleanly
     let autostart_mgr = app.autolaunch();
+    let mut warnings: Vec<String> = Vec::new();
     if new_config.autostart {
-        let _ = autostart_mgr.enable();
-    } else {
-        let _ = autostart_mgr.disable();
+        if let Err(err) = autostart_mgr.enable() {
+            warnings.push(format!("Could not enable Windows startup: {err}"));
+        }
+    } else if let Err(err) = autostart_mgr.disable() {
+        warnings.push(format!("Could not disable Windows startup: {err}"));
     }
 
-    let _ = crate::register_configured_hotkeys(&app, &new_config);
+    warnings.extend(crate::register_configured_hotkeys(&app, &new_config)?);
+    if let Ok(mut ws_warn) = state.config_warnings.lock() {
+        *ws_warn = warnings.clone();
+    }
     state.foreground_notify.notify_one();
     state.system_notify.notify_one();
     let _ = app.emit("pillvyn://config", new_config.clone());
+    let _ = app.emit("pillvyn://config-warnings", warnings);
+    let _ = app.emit("pillvyn://tray-refresh", ());
     Ok(new_config)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SaveConfigOutcome {
+    pub config: PillvynConfig,
+    pub warnings: Vec<String>,
+}
+
+#[tauri::command]
+pub fn save_settings_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    new_config: PillvynConfig,
+) -> Result<SaveConfigOutcome, String> {
+    let config = save_app_config(app, state.clone(), new_config)?;
+    let warnings = state
+        .config_warnings
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    Ok(SaveConfigOutcome { config, warnings })
+}
+
+#[tauri::command]
+pub fn validate_quick_action_cmd(kind: String, target: String) -> Result<String, String> {
+    crate::services::actions::validate_quick_action(&kind, &target)
+}
+
+#[tauri::command]
+pub fn preview_appearance(
+    app: AppHandle,
+    appearance: crate::config::AppearanceConfig,
+) -> Result<(), String> {
+    let mut sanitized = PillvynConfig {
+        appearance,
+        ..Default::default()
+    };
+    sanitized.sanitize();
+    if let Some(w) = app.get_webview_window("island") {
+        let _ = apply_window_geometry(&w, &sanitized);
+    }
+    let _ = app.emit("pillvyn://appearance-preview", sanitized.appearance);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_appearance_preview(app: AppHandle, state: State<'_, AppState>) {
+    let cfg = state.config.lock().map(|c| c.clone()).unwrap_or_default();
+    if let Some(w) = app.get_webview_window("island") {
+        let _ = apply_window_geometry(&w, &cfg);
+    }
+    let _ = app.emit("pillvyn://appearance-preview", cfg.appearance);
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TrayStateSnapshot {
+    pub version: String,
+    pub visible: bool,
+    pub expanded: bool,
+    pub dnd: bool,
+    pub focus_mode: bool,
+    pub theme: String,
+    pub accent_color: String,
+    pub opacity: f64,
+    pub media_active: bool,
+    pub media_title: String,
+    pub media_artist: String,
+    pub media_status: String,
+    pub media_app: String,
+    pub active_activities: usize,
+}
+
+#[tauri::command]
+pub fn get_tray_state(app: AppHandle, state: State<'_, AppState>) -> TrayStateSnapshot {
+    crate::build_tray_state_snapshot(&app, &state)
+}
+
+#[tauri::command]
+pub async fn tray_action(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: String,
+) -> Result<TrayStateSnapshot, String> {
+    match action.as_str() {
+        "toggle_visibility" => crate::toggle_island_visibility(&app),
+        "toggle_expand" => crate::handle_hotkey_action(&app, "toggle_expand"),
+        "toggle_dnd" => crate::toggle_dnd_flag(&app),
+        "toggle_focus" => crate::toggle_focus_flag(&app),
+        "open_settings" => {
+            crate::hide_tray_window(&app);
+            open_settings_window(app.clone()).await?;
+        }
+        "hide_tray" => crate::hide_tray_window(&app),
+        "quit" => {
+            crate::hide_tray_window(&app);
+            app.exit(0);
+        }
+        other => return Err(format!("Unknown tray action: {other}")),
+    }
+    Ok(crate::build_tray_state_snapshot(&app, &state))
 }
 
 #[tauri::command]

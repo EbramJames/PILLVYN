@@ -3,9 +3,9 @@
   --font-mono: "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
 
   --accent: #5b8cff;
-  --accent-2: #8ab4ff;
-  --accent-soft: rgba(91, 140, 255, 0.14);
-  --accent-glow: rgba(91, 140, 255, 0.22);
+  --accent-2: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 25%, transparent);
 
   --island-opacity: 0.90;
   --island-scale: 1;
@@ -22,6 +22,10 @@
   --text-primary: #f4f7ff;
   --text-secondary: rgba(226, 234, 255, 0.74);
   --text-muted: rgba(182, 194, 224, 0.52);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+  --text-4: rgba(160, 174, 206, 0.42);
 
   --status-ok: #34d399;
   --status-warn: #fbbf24;
@@ -39,26 +43,23 @@
 
 [data-theme="aurora"] {
   --surface-bg: rgba(9, 15, 20, var(--island-opacity));
-  --accent: #38d9c0;
-  --accent-2: #72e6d4;
-  --accent-soft: rgba(56, 217, 192, 0.14);
-  --accent-glow: rgba(56, 217, 192, 0.24);
+  --accent-2: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 [data-theme="midnight"] {
   --surface-bg: rgba(6, 7, 11, var(--island-opacity));
-  --accent: #8c78ff;
-  --accent-2: #b4a7ff;
-  --accent-soft: rgba(140, 120, 255, 0.15);
-  --accent-glow: rgba(140, 120, 255, 0.25);
+  --accent-2: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 [data-theme="crimson"] {
   --surface-bg: rgba(15, 9, 12, var(--island-opacity));
-  --accent: #f05a74;
-  --accent-2: #ff8e9e;
-  --accent-soft: rgba(240, 90, 116, 0.15);
-  --accent-glow: rgba(240, 90, 116, 0.25);
+  --accent-2: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 [data-theme="frosted"] {

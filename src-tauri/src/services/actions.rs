@@ -40,42 +40,55 @@ const ALLOWED_URI_PREFIXES: &[&str] = &[
     "http://",
 ];
 
-pub fn execute_quick_action(item: &QuickActionItem) -> Result<(), String> {
-    let target = item.target.trim();
-    if target.is_empty() {
+pub fn validate_quick_action(kind: &str, target: &str) -> Result<String, String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
         return Err("Quick action target cannot be empty".into());
     }
 
-    match item.kind.as_str() {
+    match kind.trim() {
         "system_tool" => {
-            let lower = target.to_ascii_lowercase();
+            let lower = trimmed.to_ascii_lowercase();
             if !ALLOWED_SYSTEM_TOOLS.contains(&lower.as_str()) {
-                return Err(format!("Unsupported system tool '{target}'"));
+                return Err(format!(
+                    "Unsupported system tool '{trimmed}'. Allowed examples: wt.exe, taskmgr.exe, calc.exe, notepad.exe, explorer.exe"
+                ));
             }
-            spawn_detached_exe(target)
+            Ok(trimmed.to_string())
         }
         "uri" | "url" => {
-            let lower = target.to_ascii_lowercase();
+            let lower = trimmed.to_ascii_lowercase();
             if !ALLOWED_URI_PREFIXES.iter().any(|p| lower.starts_with(p)) {
-                return Err(format!("Blocked URI scheme for '{target}'"));
+                return Err(format!(
+                    "Unsupported URI '{trimmed}'. Use https://, http://, or ms-settings:..."
+                ));
             }
-            open_shell_target(target)
+            Ok(trimmed.to_string())
         }
         "app" => {
-            // Only launch existing executable paths or clean .lnk/.exe files without shell metacharacters
-            if target.contains('&')
-                || target.contains('|')
-                || target.contains(';')
-                || target.contains('`')
+            if trimmed.contains('&')
+                || trimmed.contains('|')
+                || trimmed.contains(';')
+                || trimmed.contains('`')
             {
                 return Err("App path contains disallowed shell characters".into());
             }
-            let path = std::path::Path::new(target);
+            let path = std::path::Path::new(trimmed);
             if !path.is_file() {
-                return Err(format!("Executable not found: {target}"));
+                return Err(format!("Executable file not found: {trimmed}"));
             }
-            spawn_detached_exe(target)
+            Ok(trimmed.to_string())
         }
+        other => Err(format!("Unknown quick action type: {other}")),
+    }
+}
+
+pub fn execute_quick_action(item: &QuickActionItem) -> Result<(), String> {
+    let target = validate_quick_action(&item.kind, &item.target)?;
+    match item.kind.as_str() {
+        "system_tool" => spawn_detached_exe(&target),
+        "uri" | "url" => open_shell_target(&target),
+        "app" => spawn_detached_exe(&target),
         other => Err(format!("Unknown quick action kind: {other}")),
     }
 }

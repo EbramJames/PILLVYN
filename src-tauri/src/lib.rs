@@ -4,11 +4,13 @@ pub mod island;
 pub mod services;
 
 use commands::{
-    ask_ai_assistant, check_updates, clipboard_action, get_initial_state, get_monitors,
-    media_control, notification_action, open_settings_window, open_url, plugin_action,
-    push_notification, refresh_weather, run_quick_action, save_app_config,
+    ask_ai_assistant, cancel_appearance_preview, check_updates, clipboard_action,
+    get_initial_state, get_monitors, get_tray_state, media_control, notification_action,
+    open_settings_window, open_url, plugin_action, preview_appearance, push_notification,
+    refresh_weather, run_quick_action, save_app_config, save_settings_config,
     set_click_through_override, set_display_brightness, set_island_pinned, set_mute, set_volume,
-    switch_audio_device, sync_timer_activity, timer_action, update_island_hitbox, AppState,
+    switch_audio_device, sync_timer_activity, timer_action, tray_action, update_island_hitbox,
+    validate_quick_action_cmd, AppState, TrayStateSnapshot,
 };
 use config::{load_config, save_config, AppProfile, PillvynConfig};
 use island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
@@ -27,27 +29,90 @@ use services::system_ctrl::{
 };
 use services::widgets::{fetch_live_weather, WidgetEngine};
 use services::win_hooks::{spawn_foreground_hook, take_external_foreground_flag};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_autostart::MacosLauncher;
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
-pub fn register_configured_hotkeys(app: &AppHandle, cfg: &PillvynConfig) -> Result<(), String> {
+static LAST_TRAY_BLUR_MS: AtomicU64 = AtomicU64::new(0);
+
+fn normalize_hotkey_combo(combo: &str) -> String {
+    combo
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+pub fn validate_hotkeys_uniqueness(cfg: &PillvynConfig) -> Result<(), String> {
+    let entries = [
+        ("Expand / Collapse", cfg.hotkeys.toggle_expand.trim()),
+        ("Show / Hide Island", cfg.hotkeys.toggle_visibility.trim()),
+        ("Do Not Disturb", cfg.hotkeys.toggle_dnd.trim()),
+        ("Clipboard Drawer", cfg.hotkeys.clipboard_drawer.trim()),
+    ];
+    let mut seen: HashMap<String, &str> = HashMap::new();
+    for (label, raw) in entries {
+        if raw.is_empty() {
+            continue;
+        }
+        let norm = normalize_hotkey_combo(raw);
+        if norm.is_empty() {
+            continue;
+        }
+        if let Some(prev_label) = seen.insert(norm, label) {
+            return Err(format!(
+                "Duplicate global shortcut '{raw}' assigned to both '{prev_label}' and '{label}'."
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn register_configured_hotkeys(
+    app: &AppHandle,
+    cfg: &PillvynConfig,
+) -> Result<Vec<String>, String> {
+    validate_hotkeys_uniqueness(cfg)?;
+
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
 
     let pairs = [
-        (cfg.hotkeys.toggle_expand.trim(), "toggle_expand"),
-        (cfg.hotkeys.toggle_visibility.trim(), "toggle_visibility"),
-        (cfg.hotkeys.toggle_dnd.trim(), "toggle_dnd"),
-        (cfg.hotkeys.clipboard_drawer.trim(), "clipboard_drawer"),
+        (
+            cfg.hotkeys.toggle_expand.trim(),
+            "toggle_expand",
+            "Expand / Collapse",
+        ),
+        (
+            cfg.hotkeys.toggle_visibility.trim(),
+            "toggle_visibility",
+            "Show / Hide Island",
+        ),
+        (
+            cfg.hotkeys.toggle_dnd.trim(),
+            "toggle_dnd",
+            "Do Not Disturb",
+        ),
+        (
+            cfg.hotkeys.clipboard_drawer.trim(),
+            "clipboard_drawer",
+            "Clipboard Drawer",
+        ),
     ];
 
-    for (combo, action_name) in pairs {
+    let mut warnings = Vec::new();
+    for (combo, action_name, display_label) in pairs {
         if combo.is_empty() {
             continue;
         }
@@ -59,28 +124,79 @@ pub fn register_configured_hotkeys(app: &AppHandle, cfg: &PillvynConfig) -> Resu
             handle_hotkey_action(app_handle, &action);
         }) {
             warn!("Could not register global shortcut '{combo}' ({action_name}): {err}");
+            warnings.push(format!("{display_label} ('{combo}'): {err}"));
         }
     }
-    Ok(())
+    Ok(warnings)
 }
 
-fn handle_hotkey_action(app: &AppHandle, action: &str) {
+pub(crate) fn emit_island_state(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let visible = state
+        .window_state
+        .lock()
+        .map(|ws| ws.is_visible)
+        .unwrap_or(true);
+    let expanded = state.island_expanded.lock().map(|g| *g).unwrap_or(false);
+    let _ = app.emit(
+        "pillvyn://island-state",
+        serde_json::json!({
+            "visible": visible,
+            "expanded": expanded,
+        }),
+    );
+    let _ = app.emit("pillvyn://tray-refresh", ());
+}
+
+pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
     match action {
         "toggle_visibility" => toggle_island_visibility(app),
         "toggle_expand" => {
             if let Some(w) = app.get_webview_window("island") {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut was_hidden = false;
+                    if let Ok(mut ws) = state.window_state.lock() {
+                        if !ws.is_visible {
+                            ws.is_visible = true;
+                            was_hidden = true;
+                        }
+                    }
+                    if was_hidden {
+                        if let Ok(cfg) = state.config.lock() {
+                            let _ = apply_window_geometry(&w, &cfg);
+                        }
+                    }
+                }
                 if !w.is_visible().unwrap_or(false) {
                     let _ = w.show();
                 }
             }
+            emit_island_state(app);
             let _ = app.emit("pillvyn://hotkey", "toggle_expand");
         }
         "clipboard_drawer" => {
             if let Some(w) = app.get_webview_window("island") {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut was_hidden = false;
+                    if let Ok(mut ws) = state.window_state.lock() {
+                        if !ws.is_visible {
+                            ws.is_visible = true;
+                            was_hidden = true;
+                        }
+                    }
+                    if was_hidden {
+                        if let Ok(cfg) = state.config.lock() {
+                            let _ = apply_window_geometry(&w, &cfg);
+                        }
+                    }
+                }
                 if !w.is_visible().unwrap_or(false) {
                     let _ = w.show();
                 }
             }
+            emit_island_state(app);
             let _ = app.emit("pillvyn://hotkey", "clipboard_drawer");
         }
         "toggle_dnd" => toggle_dnd_flag(app),
@@ -88,7 +204,7 @@ fn handle_hotkey_action(app: &AppHandle, action: &str) {
     }
 }
 
-fn toggle_island_visibility(app: &AppHandle) {
+pub(crate) fn toggle_island_visibility(app: &AppHandle) {
     let state = app.state::<AppState>();
     if let Some(win) = app.get_webview_window("island") {
         let visible = win.is_visible().unwrap_or(true);
@@ -106,10 +222,11 @@ fn toggle_island_visibility(app: &AppHandle) {
                 ws.is_visible = true;
             }
         }
+        emit_island_state(app);
     }
 }
 
-fn toggle_dnd_flag(app: &AppHandle) {
+pub(crate) fn toggle_dnd_flag(app: &AppHandle) {
     let state = app.state::<AppState>();
     let updated = {
         let Ok(mut cfg) = state.config.lock() else {
@@ -120,6 +237,7 @@ fn toggle_dnd_flag(app: &AppHandle) {
         cfg.clone()
     };
     let _ = app.emit("pillvyn://config", updated.clone());
+    let _ = app.emit("pillvyn://tray-refresh", ());
 
     if let Ok(mut act) = state.activities.lock() {
         let now = now_ms();
@@ -154,7 +272,7 @@ fn toggle_dnd_flag(app: &AppHandle) {
     };
 }
 
-fn toggle_focus_flag(app: &AppHandle) {
+pub(crate) fn toggle_focus_flag(app: &AppHandle) {
     let state = app.state::<AppState>();
     let updated = {
         let Ok(mut cfg) = state.config.lock() else {
@@ -164,7 +282,40 @@ fn toggle_focus_flag(app: &AppHandle) {
         let _ = save_config(&cfg);
         cfg.clone()
     };
-    let _ = app.emit("pillvyn://config", updated);
+    let _ = app.emit("pillvyn://config", updated.clone());
+    let _ = app.emit("pillvyn://tray-refresh", ());
+
+    if let Ok(mut act) = state.activities.lock() {
+        let now = now_ms();
+        act.upsert(LiveActivity {
+            id: "hud-focus".into(),
+            kind: ActivityKind::SystemHud,
+            title: if updated.privacy.focus_mode {
+                "Focus Mode On".into()
+            } else {
+                "Focus Mode Off".into()
+            },
+            subtitle: if updated.privacy.focus_mode {
+                "Quiet minimal workspace active".into()
+            } else {
+                "Standard island feed restored".into()
+            },
+            accent: None,
+            badge: Some(
+                if updated.privacy.focus_mode {
+                    "FOCUS"
+                } else {
+                    "LIVE"
+                }
+                .into(),
+            ),
+            progress: None,
+            priority: 88,
+            updated_at_ms: now,
+            expires_at_ms: Some(now + 2400),
+        });
+        let _ = app.emit("pillvyn://activities", act.snapshot());
+    };
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -208,6 +359,7 @@ pub fn run() {
         island_pinned: Mutex::new(false),
         last_expanded_ms: Mutex::new(0),
         last_local_audio_action_ms: Mutex::new(0),
+        config_warnings: Mutex::new(Vec::new()),
         media_notify,
         system_notify,
         foreground_notify,
@@ -216,10 +368,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(win) = app.get_webview_window("island") {
-                let _ = win.show();
-                let _ = app.emit("pillvyn://hotkey", "toggle_expand");
-            }
+            handle_hotkey_action(app, "toggle_expand");
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -231,13 +380,35 @@ pub fn run() {
             let handle = app.handle().clone();
             let state = handle.state::<AppState>();
 
-            if let Some(island_win) = handle.get_webview_window("island") {
-                if let Ok(cfg) = state.config.lock() {
-                    let _ = apply_window_geometry(&island_win, &cfg);
-                    let _ = register_configured_hotkeys(&handle, &cfg);
+            if let Ok(actual_autostart) = handle.autolaunch().is_enabled() {
+                if let Ok(mut cfg) = state.config.lock() {
+                    if cfg.autostart != actual_autostart {
+                        cfg.autostart = actual_autostart;
+                        let _ = save_config(&cfg);
+                    }
                 }
             }
 
+            if let Some(island_win) = handle.get_webview_window("island") {
+                if let Ok(cfg) = state.config.lock() {
+                    let _ = apply_window_geometry(&island_win, &cfg);
+                    match register_configured_hotkeys(&handle, &cfg) {
+                        Ok(warnings) => {
+                            if let Ok(mut guard) = state.config_warnings.lock() {
+                                *guard = warnings;
+                            }
+                        }
+                        Err(err) => {
+                            warn!("Hotkey configuration error: {err}");
+                            if let Ok(mut guard) = state.config_warnings.lock() {
+                                *guard = vec![err];
+                            }
+                        }
+                    }
+                }
+            }
+
+            let _ = ensure_tray_window(&handle);
             setup_tray(&handle)?;
 
             spawn_click_through_controller(handle.clone(), state.window_state.clone());
@@ -253,6 +424,12 @@ pub fn run() {
             update_island_hitbox,
             set_island_pinned,
             save_app_config,
+            save_settings_config,
+            validate_quick_action_cmd,
+            preview_appearance,
+            cancel_appearance_preview,
+            get_tray_state,
+            tray_action,
             open_settings_window,
             media_control,
             set_volume,
@@ -275,46 +452,183 @@ pub fn run() {
         .expect("Failed to start PILLVYN");
 }
 
+const TRAY_MENU_LOGICAL_WIDTH: f64 = 262.0;
+const TRAY_MENU_LOGICAL_HEIGHT: f64 = 324.0;
+
+pub(crate) fn compute_tray_popup_position(
+    click: (i32, i32),
+    win_size: (i32, i32),
+    work_area: (i32, i32, i32, i32),
+    pad: i32,
+) -> (i32, i32) {
+    let (click_x, click_y) = click;
+    let (win_w, win_h) = win_size;
+    let (wa_x, wa_y, wa_w, wa_h) = work_area;
+    let min_x = wa_x + pad;
+    let max_x = (wa_x + wa_w - win_w - pad).max(min_x);
+    let x = (click_x - win_w / 2).clamp(min_x, max_x);
+
+    let min_y = wa_y + pad;
+    let max_y = (wa_y + wa_h - win_h - pad).max(min_y);
+    let above_y = click_y - win_h - pad;
+    let y = if above_y >= min_y {
+        above_y.clamp(min_y, max_y)
+    } else {
+        (click_y + pad).clamp(min_y, max_y)
+    };
+    (x, y)
+}
+
+pub(crate) fn hide_tray_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("tray") {
+        let _ = win.hide();
+    }
+}
+
+fn ensure_tray_window(app: &AppHandle) -> Option<WebviewWindow> {
+    if let Some(existing) = app.get_webview_window("tray") {
+        return Some(existing);
+    }
+
+    let builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("tray.html".into()))
+        .title("PILLVYN Menu")
+        .inner_size(TRAY_MENU_LOGICAL_WIDTH, TRAY_MENU_LOGICAL_HEIGHT)
+        .decorations(false)
+        .transparent(true)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .shadow(false)
+        .visible(false)
+        .focused(false)
+        .background_color(tauri::window::Color(0, 0, 0, 0));
+
+    match builder.build() {
+        Ok(win) => {
+            let win_clone = win.clone();
+            win.on_window_event(move |event| match event {
+                WindowEvent::Focused(false) => {
+                    LAST_TRAY_BLUR_MS.store(now_ms(), Ordering::Relaxed);
+                    let _ = win_clone.hide();
+                }
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = win_clone.hide();
+                }
+                _ => {}
+            });
+            Some(win)
+        }
+        Err(err) => {
+            warn!("Failed to build tray menu window: {err}");
+            None
+        }
+    }
+}
+
+fn show_tray_menu_near(app: &AppHandle, position: PhysicalPosition<f64>) {
+    let Some(tray_win) = ensure_tray_window(app) else {
+        return;
+    };
+
+    if tray_win.is_visible().unwrap_or(false) {
+        let _ = tray_win.hide();
+        return;
+    }
+
+    let elapsed_since_blur = now_ms().saturating_sub(LAST_TRAY_BLUR_MS.load(Ordering::Relaxed));
+    if elapsed_since_blur < 220 {
+        return;
+    }
+
+    let click_x = position.x.round() as i32;
+    let click_y = position.y.round() as i32;
+
+    let monitor = app
+        .available_monitors()
+        .ok()
+        .and_then(|list| {
+            list.into_iter().find(|m| {
+                let p = m.position();
+                let s = m.size();
+                click_x >= p.x
+                    && click_x <= p.x + s.width as i32
+                    && click_y >= p.y
+                    && click_y <= p.y + s.height as i32
+            })
+        })
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    if let Some(m) = monitor {
+        let scale = m.scale_factor().max(1.0);
+        let size = tray_win.outer_size().unwrap_or_else(|_| {
+            tauri::PhysicalSize::new(
+                (TRAY_MENU_LOGICAL_WIDTH * scale).round() as u32,
+                (TRAY_MENU_LOGICAL_HEIGHT * scale).round() as u32,
+            )
+        });
+        let wa = m.work_area();
+        let pad = (10.0 * scale).round() as i32;
+        let (x, y) = compute_tray_popup_position(
+            (click_x, click_y),
+            (size.width as i32, size.height as i32),
+            (
+                wa.position.x,
+                wa.position.y,
+                wa.size.width as i32,
+                wa.size.height as i32,
+            ),
+            pad,
+        );
+        let _ = tray_win.set_position(PhysicalPosition::new(x, y));
+    }
+
+    let _ = app.emit("pillvyn://tray-refresh", ());
+    let _ = tray_win.set_always_on_top(true);
+    let _ = tray_win.show();
+    let _ = tray_win.set_focus();
+}
+
+pub(crate) fn build_tray_state_snapshot(app: &AppHandle, state: &AppState) -> TrayStateSnapshot {
+    let cfg = state.config.lock().map(|g| g.clone()).unwrap_or_default();
+    let visible = state
+        .window_state
+        .lock()
+        .map(|ws| ws.is_visible)
+        .unwrap_or(true);
+    let expanded = state.island_expanded.lock().map(|g| *g).unwrap_or(false);
+    let media = state
+        .latest_media
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+    let active_activities = state
+        .activities
+        .lock()
+        .map(|g| g.snapshot().len())
+        .unwrap_or(0);
+
+    TrayStateSnapshot {
+        version: app.package_info().version.to_string(),
+        visible,
+        expanded,
+        dnd: cfg.privacy.dnd_mode,
+        focus_mode: cfg.privacy.focus_mode,
+        theme: cfg.appearance.theme,
+        accent_color: cfg.appearance.accent_color,
+        opacity: cfg.appearance.opacity,
+        media_active: media.active && !media.title.trim().is_empty(),
+        media_title: media.title,
+        media_artist: media.artist,
+        media_status: media.status,
+        media_app: media.source_app,
+        active_activities,
+    }
+}
+
 fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
-    let toggle_item = MenuItem::with_id(
-        app,
-        "toggle_island",
-        "Show / Hide Island",
-        true,
-        None::<&str>,
-    )?;
-    let expand_item = MenuItem::with_id(
-        app,
-        "toggle_expand",
-        "Expand / Collapse",
-        true,
-        None::<&str>,
-    )?;
-    let dnd_item = MenuItem::with_id(
-        app,
-        "toggle_dnd",
-        "Toggle Do Not Disturb",
-        true,
-        None::<&str>,
-    )?;
-    let focus_item =
-        MenuItem::with_id(app, "toggle_focus", "Toggle Focus Mode", true, None::<&str>)?;
-    let settings_item =
-        MenuItem::with_id(app, "open_settings", "Settings Studio", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit PILLVYN", true, None::<&str>)?;
-
-    let menu = Menu::with_items(
-        app,
-        &[
-            &toggle_item,
-            &expand_item,
-            &dnd_item,
-            &focus_item,
-            &settings_item,
-            &quit_item,
-        ],
-    )?;
-
     let icon = app
         .default_window_icon()
         .cloned()
@@ -323,30 +637,26 @@ fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     TrayIconBuilder::with_id("pillvyn-tray")
         .icon(icon)
         .tooltip("PILLVYN — Dynamic Island")
-        .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "toggle_island" => toggle_island_visibility(app),
-            "toggle_expand" => handle_hotkey_action(app, "toggle_expand"),
-            "toggle_dnd" => toggle_dnd_flag(app),
-            "toggle_focus" => toggle_focus_flag(app),
-            "open_settings" => {
-                let handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = open_settings_window(handle).await;
-                });
-            }
-            "quit" => app.exit(0),
-            _ => {}
-        })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
-                button: MouseButton::Left,
+                button,
                 button_state: MouseButtonState::Up,
+                position,
                 ..
             } = event
             {
-                handle_hotkey_action(tray.app_handle(), "toggle_expand");
+                let app = tray.app_handle();
+                match button {
+                    MouseButton::Left => {
+                        hide_tray_window(app);
+                        handle_hotkey_action(app, "toggle_expand");
+                    }
+                    MouseButton::Right => {
+                        show_tray_menu_near(app, position);
+                    }
+                    _ => {}
+                }
             }
         })
         .build(app)?;
@@ -450,6 +760,13 @@ fn spawn_background_services(app: AppHandle) {
                         let _ = app_fast.emit("pillvyn://activities", act.snapshot());
                     }
                 }
+            } else {
+                let state = app_fast.state::<AppState>();
+                if let Ok(mut act) = state.activities.lock() {
+                    if act.remove("media") {
+                        let _ = app_fast.emit("pillvyn://activities", act.snapshot());
+                    }
+                };
             }
 
             // Advance active timers & stopwatch
@@ -824,6 +1141,16 @@ fn spawn_background_services(app: AppHandle) {
                 }
 
                 let _ = app_slow.emit("pillvyn://gaming", gm_snap);
+            } else {
+                let st = app_slow.state::<AppState>();
+                if let Ok(mut ws) = st.window_state.lock() {
+                    ws.force_click_through = false;
+                }
+                if let Ok(mut act) = st.activities.lock() {
+                    if act.remove("gaming") {
+                        let _ = app_slow.emit("pillvyn://activities", act.snapshot());
+                    }
+                };
             }
 
             if cfg.modules.downloads {
@@ -871,6 +1198,13 @@ fn spawn_background_services(app: AppHandle) {
                     let _ = app_slow.emit("pillvyn://activities", act.snapshot());
                 }
                 let _ = app_slow.emit("pillvyn://downloads", dl_snap);
+            } else {
+                let st = app_slow.state::<AppState>();
+                if let Ok(mut act) = st.activities.lock() {
+                    if act.remove("download") {
+                        let _ = app_slow.emit("pillvyn://activities", act.snapshot());
+                    }
+                };
             }
 
             if cfg.modules.network {
@@ -911,5 +1245,62 @@ fn format_dl_subtitle(bps: f64, pct: Option<f64>) -> String {
     match pct {
         Some(p) => format!("{:.0}% · {}", p, speed),
         None => speed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_tray_popup_position, normalize_hotkey_combo, validate_hotkeys_uniqueness};
+    use crate::config::PillvynConfig;
+    use crate::services::actions::validate_quick_action;
+
+    #[test]
+    fn normalizes_and_rejects_duplicate_hotkeys() {
+        assert_eq!(
+            normalize_hotkey_combo("Ctrl + Alt + Space"),
+            "ctrl+alt+space"
+        );
+        let mut cfg = PillvynConfig::default();
+        assert!(validate_hotkeys_uniqueness(&cfg).is_ok());
+
+        cfg.hotkeys.toggle_dnd = format!("  {}  ", cfg.hotkeys.toggle_expand.to_lowercase());
+        let err = validate_hotkeys_uniqueness(&cfg).unwrap_err();
+        assert!(err.contains("Duplicate global shortcut"));
+
+        cfg.hotkeys.toggle_dnd.clear();
+        assert!(validate_hotkeys_uniqueness(&cfg).is_ok());
+    }
+
+    #[test]
+    fn clamps_tray_popup_inside_monitor_work_area() {
+        // Bottom-right taskbar click on 1920x1080 display (taskbar 48px -> work_area height 1032)
+        // Expected y clamps cleanly inside work area above taskbar (1032 - 324 - 10 = 698)
+        let (x, y) = compute_tray_popup_position((1840, 1055), (262, 324), (0, 0, 1920, 1032), 10);
+        assert_eq!(x, 1920 - 262 - 10);
+        assert_eq!(y, 1032 - 324 - 10);
+
+        // Overflow flyout click positions cleanly directly above overflow button
+        let (x2, y2) = compute_tray_popup_position((1700, 920), (262, 324), (0, 0, 1920, 1032), 10);
+        assert!(x2 >= 10 && x2 + 262 <= 1910);
+        assert_eq!(y2, 920 - 324 - 10);
+
+        // Top taskbar click places menu neatly below cursor
+        let (_x3, y3) = compute_tray_popup_position((400, 36), (262, 324), (0, 48, 1920, 1032), 10);
+        assert_eq!(y3, 58);
+    }
+
+    #[test]
+    fn validates_quick_action_targets() {
+        assert_eq!(
+            validate_quick_action("system_tool", " wt.exe ").unwrap(),
+            "wt.exe"
+        );
+        assert!(validate_quick_action("system_tool", "rm -rf /").is_err());
+        assert_eq!(
+            validate_quick_action("uri", "ms-settings:sound").unwrap(),
+            "ms-settings:sound"
+        );
+        assert!(validate_quick_action("uri", "javascript:alert(1)").is_err());
+        assert!(validate_quick_action("app", "cmd & whoami").is_err());
     }
 }
