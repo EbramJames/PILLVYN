@@ -1,3 +1,4 @@
+import { playWebDing, pulseElement, triggerIslandDing } from './effects.js';
 import {
   MODULE_TABS,
   applyVisualTheme,
@@ -53,6 +54,7 @@ let repositionMode = false;
 let desktopMove = null;
 let lastHitboxKey = '';
 let hitboxRafPending = false;
+let pendingSlideDir = null;
 
 const sendDesktopPosition = createThrottledSender(20, ({ topOffset, xOffset, monitorName }) => {
   invoke?.('move_island_position', {
@@ -231,16 +233,26 @@ const api = {
         : route.activeTab;
     const isAiDisabled = targetMod === 'ai' && (modules.ai === false || !store.config?.ai?.enabled);
     if (isAiDisabled || (targetMod && targetMod !== 'overview' && targetMod !== 'monitor' && targetMod !== 'utilities' && modules[targetMod] === false)) {
+      pendingSlideDir = 'fade';
       patchStore({ activeTab: 'overview', panelNotice: null }, 'tab');
       return;
     }
+    const prevIdx = MODULE_TABS.findIndex((t) => t.id === store.activeTab);
+    const nextIdx = MODULE_TABS.findIndex((t) => t.id === route.activeTab);
+    pendingSlideDir = nextIdx > prevIdx ? 'right' : nextIdx < prevIdx ? 'left' : 'fade';
     patchStore({ ...route, panelNotice: null }, 'tab-change');
     if (store.islandState !== 'expanded') setIslandState('expanded');
   },
   switchMonitorSubTab(subId) {
+    const prevIdx = MONITOR_SUBTABS.findIndex((t) => t.id === store.monitorSubTab);
+    const nextIdx = MONITOR_SUBTABS.findIndex((t) => t.id === subId);
+    pendingSlideDir = nextIdx > prevIdx ? 'right' : nextIdx < prevIdx ? 'left' : 'fade';
     patchStore({ monitorSubTab: subId }, 'sub-tab');
   },
   switchUtilitiesSubTab(subId) {
+    const prevIdx = UTILITIES_SUBTABS.findIndex((t) => t.id === store.utilitiesSubTab);
+    const nextIdx = UTILITIES_SUBTABS.findIndex((t) => t.id === subId);
+    pendingSlideDir = nextIdx > prevIdx ? 'right' : nextIdx < prevIdx ? 'left' : 'fade';
     patchStore({ utilitiesSubTab: subId }, 'sub-tab');
   },
   togglePin() {
@@ -288,8 +300,15 @@ const api = {
     if (commit) sendBrightness.flush(rounded);
     else sendBrightness.send(rounded);
   },
-  pushNotification(appName, title, body, priority = 'normal') {
-    invoke?.('push_notification', { appName, title, body, priority }).catch((err) => api.setPanelNotice(String(err), 'err'));
+  pushNotification(appName, title, body, priority = 'normal', kind = null) {
+    invoke?.('push_notification', { appName, title, body, priority, kind }).catch((err) => api.setPanelNotice(String(err), 'err'));
+  },
+  triggerTestSmsDing() {
+    invoke?.('trigger_test_sms_ding').catch((err) => api.setPanelNotice(String(err), 'err'));
+    if (!window.__TAURI_INTERNALS__) {
+      triggerIslandDing(shell, { is_sms: true });
+      playWebDing();
+    }
   },
   notificationAction(action, id = null) {
     invoke?.('notification_action', { action, id }).then((snap) => {
@@ -445,6 +464,19 @@ function renderActivePanel() {
   }
 
   clear(panelEl);
+  const slideDir = pendingSlideDir;
+  pendingSlideDir = null;
+  if (slideDir && !document.body.classList.contains('reduced-motion')) {
+    panelEl.classList.remove('panel-slide-left', 'panel-slide-right', 'panel-fade');
+    void panelEl.offsetWidth;
+    panelEl.classList.add(
+      slideDir === 'right'
+        ? 'panel-slide-right'
+        : slideDir === 'left'
+          ? 'panel-slide-left'
+          : 'panel-fade'
+    );
+  }
   if (store.panelNotice?.text) {
     const toneColor = store.panelNotice.tone === 'err'
       ? 'rgba(248, 113, 113, 0.4)'
@@ -548,6 +580,7 @@ function handleActivityClick(act) {
     timer: 'widgets',
     download: 'downloads',
     gaming: 'gaming',
+    sms: 'notifications',
     notification: 'notifications',
     system_hud: 'system',
     plugin: 'plugins',
@@ -786,16 +819,21 @@ shell.addEventListener('pointercancel', () => {
   dragGesture = null;
 });
 
-document.getElementById('btn-pin')?.addEventListener('click', () => api.togglePin());
+document.getElementById('btn-pin')?.addEventListener('click', (e) => {
+  pulseElement(e.currentTarget);
+  api.togglePin();
+});
 document.getElementById('btn-collapse').addEventListener('click', () => setIslandState('compact'));
 document.getElementById('btn-minimize').addEventListener('click', () => setIslandState('minimized'));
 document.getElementById('btn-settings').addEventListener('click', () => api.openSettings());
 
-document.getElementById('btn-dnd').addEventListener('click', () => {
+document.getElementById('btn-dnd').addEventListener('click', (e) => {
+  pulseElement(e.currentTarget);
   invoke?.('tray_action', { action: 'toggle_dnd' }).catch((err) => api.setPanelNotice(String(err), 'err'));
 });
 
-document.getElementById('btn-focus').addEventListener('click', () => {
+document.getElementById('btn-focus').addEventListener('click', (e) => {
+  pulseElement(e.currentTarget);
   invoke?.('tray_action', { action: 'toggle_focus' }).catch((err) => api.setPanelNotice(String(err), 'err'));
 });
 
@@ -898,13 +936,20 @@ async function bootstrap() {
   if (listen) {
     await listen('pillvyn://config', (e) => patchStore({ config: e.payload }, 'config'));
     await listen('pillvyn://appearance-preview', (e) => {
+      const prevEmojis = store.config?.appearance?.show_emojis !== false;
       const nextCfg = {
         ...(store.config || {}),
         appearance: e.payload,
       };
-      store.config = nextCfg;
-      applyVisualTheme(shell, nextCfg, store.activeProfile);
-      scheduleReportHitbox();
+      const nextEmojis = nextCfg.appearance?.show_emojis !== false;
+      if (prevEmojis !== nextEmojis) {
+        patchStore({ config: nextCfg }, 'config');
+      } else {
+        store.config = nextCfg;
+        applyVisualTheme(shell, nextCfg, store.activeProfile);
+        renderCompactAndMinimized(store, api);
+        scheduleReportHitbox();
+      }
     });
     await listen('pillvyn://activities', (e) => patchStore({ activities: e.payload }, 'activities'));
     await listen('pillvyn://media', (e) => {
@@ -927,6 +972,19 @@ async function bootstrap() {
     await listen('pillvyn://gaming', (e) => patchStore({ gaming: e.payload }, 'gaming'));
     await listen('pillvyn://downloads', (e) => patchStore({ downloads: e.payload }, 'downloads'));
     await listen('pillvyn://notifications', (e) => patchStore({ notifications: e.payload }, 'notifications'));
+    await listen('pillvyn://notification-ding', (e) => {
+      const payload = e.payload || {};
+      const dnd = Boolean(store.config?.privacy?.dnd_mode || store.config?.privacy?.focus_mode);
+      if (dnd || store.config?.appearance?.sms_ding_enabled === false) return;
+      triggerIslandDing(shell, payload);
+      if (payload.play_sound && store.config?.appearance?.sms_ding_sound !== false) {
+        // Win32 builds play the native PCM ding asynchronously via sound.rs;
+        // preview / non-Windows contexts chime softly through Web Audio.
+        if (!window.__TAURI_INTERNALS__ || !navigator.userAgent.includes('Windows')) {
+          playWebDing();
+        }
+      }
+    });
     await listen('pillvyn://clipboard', (e) => patchStore({ clipboard: e.payload }, 'clipboard'));
     await listen('pillvyn://network', (e) => patchStore({ network: e.payload }, 'network'));
     await listen('pillvyn://weather', (e) => patchStore({ weather: e.payload }, 'weather'));

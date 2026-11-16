@@ -46,6 +46,9 @@ pub struct AppearanceConfig {
     pub minimal_idle: bool,
     pub click_outside_dismiss: bool,
     pub show_volume_hud: bool,
+    pub show_emojis: bool,
+    pub sms_ding_enabled: bool,
+    pub sms_ding_sound: bool,
     pub auto_collapse_ms: u64,
 }
 
@@ -160,6 +163,9 @@ impl Default for AppearanceConfig {
             minimal_idle: true,
             click_outside_dismiss: true,
             show_volume_hud: true,
+            show_emojis: true,
+            sms_ding_enabled: true,
+            sms_ding_sound: true,
             auto_collapse_ms: 0,
         }
     }
@@ -515,6 +521,9 @@ mod tests {
         assert!(cfg.appearance.hover_peek);
         assert!(cfg.appearance.click_outside_dismiss);
         assert!(cfg.appearance.show_volume_hud);
+        assert!(cfg.appearance.show_emojis);
+        assert!(cfg.appearance.sms_ding_enabled);
+        assert!(cfg.appearance.sms_ding_sound);
         assert!(!cfg.autostart_initialized);
     }
 

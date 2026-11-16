@@ -10,8 +10,8 @@ use commands::{
     push_notification, refresh_weather, resize_tray_window, run_quick_action, save_app_config,
     save_settings_config, set_click_through_override, set_display_brightness, set_island_pinned,
     set_mute, set_reposition_mode, set_volume, switch_audio_device, sync_timer_activity,
-    timer_action, tray_action, update_island_hitbox, validate_quick_action_cmd, AppState,
-    TrayStateSnapshot,
+    timer_action, tray_action, trigger_test_sms_ding, update_island_hitbox,
+    validate_quick_action_cmd, AppState, TrayStateSnapshot,
 };
 use config::{load_config, save_config, AppProfile, PillvynConfig};
 use island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
@@ -156,77 +156,56 @@ pub(crate) fn emit_island_state(app: &AppHandle) {
     let _ = app.emit("pillvyn://tray-refresh", ());
 }
 
+fn wake_island_for_hotkey(app: &AppHandle, target_expanded: Option<bool>) -> bool {
+    let mut next_expanded = target_expanded.unwrap_or(true);
+    if let Some(w) = app.get_webview_window("island") {
+        if let Some(state) = app.try_state::<AppState>() {
+            let mut was_hidden = false;
+            if let Ok(mut ws) = state.window_state.lock() {
+                if !ws.is_visible {
+                    ws.is_visible = true;
+                    was_hidden = true;
+                }
+            }
+            if let Ok(mut exp) = state.island_expanded.lock() {
+                next_expanded = target_expanded.unwrap_or(if was_hidden { true } else { !*exp });
+                *exp = next_expanded;
+            }
+            if let Ok(mut rep) = state.reposition_mode.lock() {
+                if *rep {
+                    *rep = false;
+                    let _ = app.emit("pillvyn://reposition-mode", false);
+                }
+            }
+            if next_expanded {
+                if let Ok(mut ts) = state.last_expanded_ms.lock() {
+                    *ts = now_ms();
+                }
+                state.telemetry_notify.notify_one();
+            } else if let Ok(mut pinned) = state.island_pinned.lock() {
+                *pinned = false;
+            }
+            let cfg = crate::commands::effective_island_config(&state);
+            let _ = apply_window_geometry(&w, &cfg);
+        }
+        if !w.is_visible().unwrap_or(false) {
+            let _ = w.show();
+        }
+        enforce_tool_window(&w);
+    }
+    emit_island_state(app);
+    next_expanded
+}
+
 pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
     match action {
         "toggle_visibility" => toggle_island_visibility(app),
         "toggle_expand" => {
-            let mut next_expanded = true;
-            if let Some(w) = app.get_webview_window("island") {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut was_hidden = false;
-                    if let Ok(mut ws) = state.window_state.lock() {
-                        if !ws.is_visible {
-                            ws.is_visible = true;
-                            was_hidden = true;
-                        }
-                    }
-                    if let Ok(mut exp) = state.island_expanded.lock() {
-                        next_expanded = if was_hidden { true } else { !*exp };
-                        *exp = next_expanded;
-                    }
-                    if let Ok(mut rep) = state.reposition_mode.lock() {
-                        if *rep {
-                            *rep = false;
-                            let _ = app.emit("pillvyn://reposition-mode", false);
-                        }
-                    }
-                    if next_expanded {
-                        if let Ok(mut ts) = state.last_expanded_ms.lock() {
-                            *ts = now_ms();
-                        }
-                        state.telemetry_notify.notify_one();
-                    } else if let Ok(mut pinned) = state.island_pinned.lock() {
-                        *pinned = false;
-                    }
-                    let cfg = crate::commands::effective_island_config(&state);
-                    let _ = apply_window_geometry(&w, &cfg);
-                }
-                if !w.is_visible().unwrap_or(false) {
-                    let _ = w.show();
-                }
-                enforce_tool_window(&w);
-            }
-            emit_island_state(app);
+            let next_expanded = wake_island_for_hotkey(app, None);
             let _ = app.emit("pillvyn://set-expanded", next_expanded);
         }
         "clipboard_drawer" => {
-            if let Some(w) = app.get_webview_window("island") {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut was_hidden = false;
-                    if let Ok(mut ws) = state.window_state.lock() {
-                        if !ws.is_visible {
-                            ws.is_visible = true;
-                            was_hidden = true;
-                        }
-                    }
-                    if let Ok(mut exp) = state.island_expanded.lock() {
-                        *exp = true;
-                    }
-                    if let Ok(mut ts) = state.last_expanded_ms.lock() {
-                        *ts = now_ms();
-                    }
-                    if was_hidden {
-                        if let Ok(cfg) = state.config.lock() {
-                            let _ = apply_window_geometry(&w, &cfg);
-                        }
-                    }
-                }
-                if !w.is_visible().unwrap_or(false) {
-                    let _ = w.show();
-                }
-                enforce_tool_window(&w);
-            }
-            emit_island_state(app);
+            wake_island_for_hotkey(app, Some(true));
             let _ = app.emit("pillvyn://hotkey", "clipboard_drawer");
         }
         "toggle_dnd" => toggle_dnd_flag(app),
@@ -466,6 +445,7 @@ pub fn run() {
 
             spawn_click_through_controller(handle.clone(), state.window_state.clone());
             spawn_clipboard_listener(handle.clone(), state.clipboard.clone());
+            services::notifications::spawn_windows_notification_watcher(handle.clone());
             spawn_background_services(handle.clone());
 
             if std::env::args().any(|a| a == "--settings" || a == "--open-settings") {
@@ -500,6 +480,7 @@ pub fn run() {
             switch_audio_device,
             set_display_brightness,
             push_notification,
+            trigger_test_sms_ding,
             notification_action,
             clipboard_action,
             run_quick_action,
@@ -705,6 +686,8 @@ pub(crate) fn build_tray_state_snapshot(app: &AppHandle, state: &AppState) -> Tr
         theme: cfg.appearance.theme,
         accent_color: cfg.appearance.accent_color,
         opacity: cfg.appearance.opacity,
+        show_emojis: cfg.appearance.show_emojis,
+        reduced_motion: cfg.appearance.reduced_motion,
         media_active: media.active && !media.title.trim().is_empty(),
         media_title: media.title,
         media_artist: media.artist,

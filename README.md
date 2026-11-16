@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.5.0" src="https://img.shields.io/badge/Version-v1.5.0-f4f7ff?labelColor=090a0e" /></a>
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v2.0.0" src="https://img.shields.io/badge/Version-v2.0.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -40,7 +40,16 @@
 | :---: |
 | <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
 
-## Features & v1.5.0 Highlights
+## Features & v2.0.0 Highlights
+
+- **Apple-Inspired Fluid Motion & Contemporary UI**:
+  - Elastic spring morphing across Minimized, Compact, and Expanded states, silky hover-to-peek controls glide, directional left/right tab and sub-tab slide animations, subtle frosted album-art ambient glow behind the Media hero, a compact **SVG Circular Progress Ring**, and tactile micro-bounces — strictly respecting **Reduced Motion**.
+- **SMS Arrival "Ding" Effect (Audio + Luminous Shimmer)**:
+  - Incoming SMS & messaging alerts (Phone Link, Messages, WhatsApp, Telegram, Signal, Discord, Slack, and custom alerts) trigger a refined Win32 PCM double-bell chime paired with an emerald-indigo capsule halo sweep, SMS pill badge, and instant **Test SMS Ding** controls in Alerts & Settings Studio — automatically hushed during Do Not Disturb and Focus Mode.
+- **Intuitive Toggleable Emojis Across Island & Tray**:
+  - Unified, tasteful contextual emojis (`💬`, `🔔`, `🎵`, `⏱️`, `📥`, `🎮`, `☀️`, `🌧️`, `⚡`, `🪫`, `🛡️`, `📌`) across Compact/Minimized pills, Live Activity badges, weather conditions, battery cards, and the Tray Menu, toggleable anytime in **Settings Studio → Display & Behavior**.
+
+### Previous v1.5.0 Highlights
 
 - **Automatic Windows Startup Integration**:
   - Enabled **Launch PILLVYN at Windows Startup** by default (`autostart: true` + `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registration during NSIS setup and automatic sync on startup), while cleanly honoring manual opt-outs saved in Settings Studio and removing startup entries on uninstall.
@@ -86,9 +95,9 @@
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.5.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_2.0.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
 2. Run the NSIS installer (supports **Current User** or **All Users**, automatic **Windows Startup** registration, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_1.5.0_x64-setup.exe.sha256`.
+3. Verify integrity (optional): compare against `PILLVYN_2.0.0_x64-setup.exe.sha256`.
 4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**

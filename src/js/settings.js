@@ -1,3 +1,4 @@
+import { playWebDing } from './effects.js';
 import {
   THEME_PRESETS,
   applyAppearanceVars,
@@ -77,7 +78,7 @@ let savedConfig = null;
 let config = null;
 let monitors = [];
 let plugins = null;
-let appVersion = '1.5.0';
+let appVersion = '2.0.0';
 let islandVisible = true;
 let islandExpanded = false;
 let activeSection = 'appearance';
@@ -99,6 +100,7 @@ function el(tag, attrs = {}, children = []) {
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'disabled') node.disabled = Boolean(v);
     else if (k === 'checked') node.checked = Boolean(v);
+    else if (k === 'selected') node.selected = Boolean(v);
     else if (k === 'value') node.value = String(v);
     else node.setAttribute(k, v === true ? '' : String(v));
   }
@@ -199,14 +201,16 @@ function updateLivePreviewBox() {
   const preset = getThemePreset(ap.theme);
   const scale = Number(ap.scale || 1);
   applyAppearanceVars(ap, { themeTarget: cap, varTarget: cap, applyOpacity: true });
+  document.body.classList.toggle('reduced-motion', Boolean(ap.reduced_motion));
   cap.style.width = `${Math.round(ap.compact_width || 268)}px`;
   cap.style.transform = `scale(${scale.toFixed(2)})`;
+  const emojisOn = ap.show_emojis !== false;
   if (titleEl) {
     titleEl.textContent = config.privacy?.dnd_mode
-      ? 'Do Not Disturb'
+      ? `${emojisOn ? '🔕 ' : ''}Do Not Disturb`
       : config.privacy?.focus_mode
-        ? 'Focus Active'
-        : 'PILLVYN · Ready';
+        ? `${emojisOn ? '🌙 ' : ''}Focus Active`
+        : `${emojisOn ? '✨ ' : ''}PILLVYN · Ready`;
   }
   if (badgeEl) {
     badgeEl.textContent = `${preset.name}`;
@@ -819,6 +823,57 @@ function renderBehaviorSection(container) {
           scheduleLiveAppearancePreview();
         }
       ),
+      toggleRow(
+        'Intuitive Emojis',
+        'Display expressive status, SMS, weather, media, and power emojis across the Island & Tray.',
+        ap.show_emojis !== false,
+        (v) => {
+          ap.show_emojis = v;
+          scheduleLiveAppearancePreview();
+        },
+        { id: 'toggle-show-emojis' }
+      ),
+      toggleRow(
+        'SMS Arrival Ding Effect',
+        'Trigger a glowing capsule shimmer and priority badge when an SMS or message arrives.',
+        ap.sms_ding_enabled !== false,
+        (v) => {
+          ap.sms_ding_enabled = v;
+          scheduleLiveAppearancePreview();
+        },
+        { id: 'toggle-sms-ding-enabled' }
+      ),
+      toggleRow(
+        'SMS Chime Sound',
+        'Play a soft crystalline ding tone when an SMS arrives (muted during Do Not Disturb & Focus Mode).',
+        ap.sms_ding_sound !== false,
+        (v) => {
+          ap.sms_ding_sound = v;
+          scheduleLiveAppearancePreview();
+        },
+        { id: 'toggle-sms-ding-sound' }
+      ),
+      el('div', { class: 'setting-row' }, [
+        el('div', { class: 'row-info' }, [
+          el('div', { class: 'row-title', text: 'Preview SMS Arrival Ding' }),
+          el('div', { class: 'row-desc', text: 'Test the live Dynamic Island SMS chime sound and shimmer animation immediately.' }),
+        ]),
+        el('div', { class: 'row-control' }, [
+          el('button', {
+            type: 'button',
+            id: 'btn-settings-test-sms',
+            class: 'btn-secondary',
+            text: '💬 Test SMS Ding',
+            onClick: () => {
+              if (invoke) {
+                invoke('trigger_test_sms_ding').catch((err) => showBanner(String(err), 'err'));
+              } else {
+                playWebDing();
+              }
+            },
+          }),
+        ]),
+      ]),
     ])
   );
 
@@ -1498,7 +1553,7 @@ async function init() {
     config = structuredClone(initPayload.config);
     monitors = initPayload.monitors || [];
     plugins = initPayload.plugins || null;
-    appVersion = initPayload.app_version || '1.5.0';
+    appVersion = initPayload.app_version || '2.0.0';
     islandVisible = initPayload.island_visible !== false;
     islandExpanded = Boolean(initPayload.island_expanded);
 

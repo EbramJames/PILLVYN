@@ -5,6 +5,22 @@ All notable changes to **PILLVYN** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-17
+### Added
+- **SMS Arrival "Ding" Audio + Luminous Capsule Effect (`services/sound.rs`, `services/notifications.rs`, `src/js/effects.js`)**:
+  - Added in-memory synthesized 44.1 kHz 16-bit PCM WAV crystalline double-bell chime (`Win32 PlaySoundW` with `SND_MEMORY | SND_ASYNC | SND_NODEFAULT`) paired with `pillvyn://notification-ding`, a luminous emerald-indigo capsule halo + specular sweep animation, SMS pill highlight, and a **Test SMS Ding** preview action in both the Island Alerts panel and Settings Studio.
+  - Added automatic SMS/messaging classification (`Phone Link`, `Messages`, `WhatsApp`, `Telegram`, `Signal`, `Discord`, `Slack`, and explicit `"sms"` alerts), plus an event-checked `UserNotificationListener` Action Center watcher when MSIX access is granted, while cleanly muting sounds during Do Not Disturb or Focus Mode.
+- **Unified Intuitive Emojis & Settings Toggles (`src/js/emoji.js`, `config.rs`)**:
+  - Added consistent, toggleable intuitive emojis (`show_emojis`, `sms_ding_enabled`, `sms_ding_sound` in `AppearanceConfig`) covering Compact & Minimized capsules, Live Activity pills, Weather conditions, Battery states, SMS alerts, Media status, Downloads, Gaming Focus, Network, Clipboard pins, and the Obsidian Glass Tray Menu.
+- **Contemporary Apple Dynamic Island Visual Polish**:
+  - Added a live **SVG Circular Progress Ring** inside the Compact pill for media playback, active countdowns, and downloads alongside frosted blurred album-art ambient glow inside the Expanded Media Player.
+
+### Changed & Cleaned
+- **Fluid Motion & Spring Choreography**:
+  - Replaced abrupt show/hide jumps on Hover Quick-Peek, tab switches, sub-tab switches, button toggles, and Settings panels with tuned Apple-inspired spring/liquid cubic-bezier motion, directional slide transitions, and tactile bounce micro-interactions — strictly honoring `reduced_motion`.
+- **Full-Codebase Cleanup**:
+  - Fixed DOM property assignment (`selected`, `disabled`, `checked`, `value`) in `src/js/utils.js` and `src/js/settings.js`, deduplicated hotkey wakeup logic (`wake_island_for_hotkey`) and cleared desktop reposition mode cleanly in `src-tauri/src/lib.rs`, introduced `NotificationRequest` in `notifications.rs` for zero-warning `cargo clippy -- -D warnings`, and exposed `show_emojis` and `reduced_motion` to the Tray Menu snapshot.
+
 ## [1.5.0] - 2026-11-16
 ### Added
 - **Windows Startup Integration by Default**:

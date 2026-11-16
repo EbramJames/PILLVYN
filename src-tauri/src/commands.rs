@@ -13,11 +13,13 @@ use crate::services::hardware::HardwareSnapshot;
 use crate::services::media::{control_media_for_source, MediaSnapshot};
 use crate::services::network::NetworkSnapshot;
 use crate::services::notifications::{
-    NotificationHub, NotificationPriority, NotificationsSnapshot,
+    AppNotification, NotificationHub, NotificationPriority, NotificationRequest,
+    NotificationsSnapshot,
 };
 use crate::services::plugins::{
     create_example_plugin, discover_plugins, toggle_plugin_enabled, PluginsSnapshot,
 };
+use crate::services::sound::play_sms_ding;
 use crate::services::system_ctrl::{
     set_brightness_percent, set_default_audio_device, set_endpoint_mute, set_endpoint_volume,
     SystemControlsSnapshot,
@@ -581,6 +583,8 @@ pub struct TrayStateSnapshot {
     pub theme: String,
     pub accent_color: String,
     pub opacity: f64,
+    pub show_emojis: bool,
+    pub reduced_motion: bool,
     pub media_active: bool,
     pub media_title: String,
     pub media_artist: String,
@@ -785,6 +789,99 @@ fn push_transient_hud(
     }
 }
 
+pub(crate) fn dispatch_notification_and_ding(
+    app: &AppHandle,
+    state: &AppState,
+    req: NotificationRequest<'_>,
+) -> Result<AppNotification, String> {
+    let clean_title = req.title.trim().to_string();
+    if clean_title.is_empty() {
+        return Err("Notification title cannot be empty".into());
+    }
+
+    let (dnd, ding_enabled, ding_sound) = state
+        .config
+        .lock()
+        .map(|c| {
+            (
+                c.privacy.dnd_mode || c.privacy.focus_mode,
+                c.appearance.sms_ding_enabled,
+                c.appearance.sms_ding_sound,
+            )
+        })
+        .unwrap_or((false, true, true));
+
+    let prio = req.priority.clone();
+    let explicit_sms = matches!(req.kind_hint, Some(h) if h.eq_ignore_ascii_case("sms"));
+    let clean_req = NotificationRequest {
+        app_name: req.app_name.trim().chars().take(40).collect(),
+        title: clean_title.chars().take(80).collect(),
+        body: req.body.trim().chars().take(240).collect(),
+        priority: req.priority,
+        source: req.source,
+        kind_hint: req.kind_hint,
+    };
+
+    let item = {
+        let mut hub = state
+            .notifications
+            .lock()
+            .map_err(|_| "Notification hub lock error")?;
+        let created = hub.push_with_kind(clean_req, dnd);
+        let _ = app.emit("pillvyn://notifications", hub.snapshot());
+        created
+    };
+
+    if !item.suppressed_by_dnd {
+        if let Ok(mut act) = state.activities.lock() {
+            let now = now_ms();
+            let is_sms = item.is_sms;
+            act.upsert(LiveActivity {
+                id: format!("notif-{}", item.id),
+                kind: if is_sms {
+                    ActivityKind::Sms
+                } else {
+                    ActivityKind::Notification
+                },
+                title: item.title.clone(),
+                subtitle: if item.body.is_empty() {
+                    item.app_name.clone()
+                } else {
+                    format!("{} · {}", item.app_name, item.body)
+                },
+                accent: None,
+                badge: Some(item.app_name.clone()),
+                progress: None,
+                priority: if is_sms { 99 } else { 95 },
+                updated_at_ms: now,
+                expires_at_ms: Some(now + if is_sms { 5600 } else { 4500 }),
+            });
+            let _ = app.emit("pillvyn://activities", act.snapshot());
+        }
+
+        if ding_enabled && (item.is_sms || explicit_sms || prio == NotificationPriority::Critical) {
+            let should_chime = ding_sound && (item.is_sms || explicit_sms);
+            let _ = app.emit(
+                "pillvyn://notification-ding",
+                serde_json::json!({
+                    "id": item.id,
+                    "app_name": item.app_name,
+                    "title": item.title,
+                    "body": item.body,
+                    "is_sms": item.is_sms,
+                    "play_sound": should_chime,
+                    "timestamp_ms": item.timestamp_ms,
+                }),
+            );
+            if should_chime {
+                play_sms_ding();
+            }
+        }
+    }
+
+    Ok(item)
+}
+
 #[tauri::command]
 pub fn push_notification(
     app: AppHandle,
@@ -793,63 +890,43 @@ pub fn push_notification(
     title: String,
     body: String,
     priority: Option<String>,
+    kind: Option<String>,
 ) -> Result<(), String> {
-    let clean_title = title.trim();
-    if clean_title.is_empty() {
-        return Err("Notification title cannot be empty".into());
-    }
     let prio = match priority.as_deref() {
         Some("critical") => NotificationPriority::Critical,
         Some("high") => NotificationPriority::High,
         Some("low") => NotificationPriority::Low,
         _ => NotificationPriority::Normal,
     };
+    dispatch_notification_and_ding(
+        &app,
+        &state,
+        NotificationRequest {
+            app_name,
+            title,
+            body,
+            priority: prio,
+            source: "app".to_string(),
+            kind_hint: kind.as_deref(),
+        },
+    )?;
+    Ok(())
+}
 
-    let dnd = state
-        .config
-        .lock()
-        .map(|c| c.privacy.dnd_mode || c.privacy.focus_mode)
-        .unwrap_or(false);
-
-    let item = {
-        let mut hub = state
-            .notifications
-            .lock()
-            .map_err(|_| "Notification hub lock error")?;
-        let created = hub.push(
-            app_name.trim().chars().take(40).collect(),
-            clean_title.chars().take(80).collect(),
-            body.trim().chars().take(240).collect(),
-            prio,
-            "app".to_string(),
-            dnd,
-        );
-        let _ = app.emit("pillvyn://notifications", hub.snapshot());
-        created
-    };
-
-    if !item.suppressed_by_dnd {
-        if let Ok(mut act) = state.activities.lock() {
-            let now = now_ms();
-            act.upsert(LiveActivity {
-                id: format!("notif-{}", item.id),
-                kind: ActivityKind::Notification,
-                title: item.title.clone(),
-                subtitle: if item.body.is_empty() {
-                    item.app_name.clone()
-                } else {
-                    format!("{} · {}", item.app_name, item.body)
-                },
-                accent: None,
-                badge: Some(item.app_name),
-                progress: None,
-                priority: 95,
-                updated_at_ms: now,
-                expires_at_ms: Some(now + 4500),
-            });
-            let _ = app.emit("pillvyn://activities", act.snapshot());
-        }
-    }
+#[tauri::command]
+pub fn trigger_test_sms_ding(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    dispatch_notification_and_ding(
+        &app,
+        &state,
+        NotificationRequest {
+            app_name: "Messages".to_string(),
+            title: "New SMS · Alex".to_string(),
+            body: "Hey! PILLVYN v2.0.0 is crystal smooth.".to_string(),
+            priority: NotificationPriority::High,
+            source: "test".to_string(),
+            kind_hint: Some("sms"),
+        },
+    )?;
     Ok(())
 }
 

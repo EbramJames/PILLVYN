@@ -1,6 +1,8 @@
+import { activityEmoji, batteryEmoji, respectsShowEmojis, statusEmoji, withEmoji } from '../emoji.js';
 import { clampPercent, createRangeSlider, el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
 
 export function renderOverview(store, api) {
+  const showEmojis = respectsShowEmojis(store.config);
   const root = el('div', { class: 'stack' });
 
   // 1. Live Now Playing or Focus Summary Card
@@ -20,13 +22,14 @@ export function renderOverview(store, api) {
     ]);
 
     const pct = media.duration_sec > 0 ? clampPercent((media.position_sec / media.duration_sec) * 100) : 0;
+    const mediaEmoji = activityEmoji('media', { status: media.status }, showEmojis);
     root.appendChild(
       el('div', { class: 'glass-card' }, [
         el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, [
           thumb,
           el('div', { class: 'track-meta' }, [
             el('div', { class: 'track-title', style: { fontSize: '13px' }, text: media.title || 'Media Playing' }),
-            el('div', { class: 'track-artist', text: `${media.artist || media.source_app || 'Media'} · ${formatDuration(media.position_sec)} / ${formatDuration(media.duration_sec)}` }),
+            el('div', { class: 'track-artist', text: withEmoji(mediaEmoji, `${media.artist || media.source_app || 'Media'} · ${formatDuration(media.position_sec)} / ${formatDuration(media.duration_sec)}`) }),
           ]),
           controls,
         ]),
@@ -42,7 +45,7 @@ export function renderOverview(store, api) {
     root.appendChild(
       el('div', { class: 'glass-card' }, [
         el('div', { class: 'card-title-row', style: { marginBottom: '4px' } }, [
-          el('span', { class: 'card-label', text: activeTimer.label }),
+          el('span', { class: 'card-label', text: withEmoji(statusEmoji('timer', showEmojis), activeTimer.label) }),
           el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
             el('span', { class: 'card-value', text: formatDuration(activeTimer.remaining_seconds) }),
             el('button', { type: 'button', class: 'pill-btn', style: { padding: '2px 8px', fontSize: '10px' }, onClick: () => api.timerAction('toggle', activeTimer.id) }, 'Pause'),
@@ -150,7 +153,7 @@ export function renderOverview(store, api) {
   root.appendChild(
     el('div', { class: 'grid-3' }, [
       makeNavCard(hwEnabled, 'hardware', [
-        el('div', { class: 'card-label', text: 'CPU / RAM' }),
+        el('div', { class: 'card-label', text: withEmoji(showEmojis ? '⚙️' : '', 'CPU / RAM') }),
         el('div', {
           class: 'card-value',
           style: { marginTop: '4px' },
@@ -162,7 +165,13 @@ export function renderOverview(store, api) {
         }),
       ]),
       makeNavCard(netEnabled, 'network', [
-        el('div', { class: 'card-label', text: net?.vpn_active ? 'Network · VPN' : 'Network' }),
+        el('div', {
+          class: 'card-label',
+          text: withEmoji(
+            net?.vpn_active ? statusEmoji('vpn', showEmojis) : statusEmoji('wifi', showEmojis),
+            net?.vpn_active ? 'Network · VPN' : 'Network'
+          ),
+        }),
         el('div', {
           class: 'card-value',
           style: { marginTop: '4px' },
@@ -174,7 +183,10 @@ export function renderOverview(store, api) {
         }),
       ]),
       makeNavCard(sysEnabled, 'system', [
-        el('div', { class: 'card-label', text: 'Power' }),
+        el('div', {
+          class: 'card-label',
+          text: withEmoji(batteryEmoji(batt?.percent, batt?.charging, batt?.present, showEmojis), 'Power'),
+        }),
         el('div', {
           class: 'card-value',
           style: { marginTop: '4px' },

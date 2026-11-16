@@ -10,6 +10,7 @@ pub enum ActivityKind {
     Download,
     Gaming,
     Notification,
+    Sms,
     SystemHud,
     Plugin,
 }

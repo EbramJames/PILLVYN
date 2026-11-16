@@ -1,3 +1,4 @@
+import { batteryEmoji, respectsShowEmojis, withEmoji } from '../emoji.js';
 import { clampPercent, createRangeSlider, el, formatDuration, icon } from '../utils.js';
 
 export function renderSystem(store, api) {
@@ -5,6 +6,7 @@ export function renderSystem(store, api) {
   if (!sys) {
     return el('div', { class: 'empty-state', text: 'Querying Windows audio & system controls…' });
   }
+  const showEmojis = respectsShowEmojis(store.config);
 
   const outPct = Math.round(clampPercent((sys.output_volume || 0) * 100));
   const micPct = Math.round(clampPercent((sys.mic_volume || 0) * 100));
@@ -14,20 +16,24 @@ export function renderSystem(store, api) {
     class: 'select-glass',
     onChange: (e) => api.switchAudioDevice(e.target.value),
   }, sys.output_devices.map((d) =>
-    el('option', { value: d.id, selected: d.is_default ? 'selected' : null, text: d.name })
+    el('option', { value: d.id, selected: Boolean(d.is_default), text: d.name })
   ));
 
   const inSelect = el('select', {
     class: 'select-glass',
     onChange: (e) => api.switchAudioDevice(e.target.value),
   }, sys.input_devices.map((d) =>
-    el('option', { value: d.id, selected: d.is_default ? 'selected' : null, text: d.name })
+    el('option', { value: d.id, selected: Boolean(d.is_default), text: d.name })
   ));
 
   const batt = sys.battery;
-  const battDesc = !batt.present
-    ? (batt.ac_online ? 'Desktop / AC Power' : 'No battery detected')
-    : `${batt.percent ?? '--'}% · ${batt.charging ? 'Charging' : (batt.ac_online ? 'Plugged in' : 'Discharging')}${batt.remaining_seconds ? ` · ${formatDuration(batt.remaining_seconds)} left` : ''}`;
+  const battIcon = batteryEmoji(batt.percent, batt.charging, batt.present, showEmojis);
+  const battDesc = withEmoji(
+    battIcon,
+    !batt.present
+      ? (batt.ac_online ? 'Desktop / AC Power' : 'No battery detected')
+      : `${batt.percent ?? '--'}% · ${batt.charging ? 'Charging' : (batt.ac_online ? 'Plugged in' : 'Discharging')}${batt.remaining_seconds ? ` · ${formatDuration(batt.remaining_seconds)} left` : ''}`
+  );
 
   const outReadout = el('span', { text: sys.output_muted ? 'Muted' : `${outPct}%` });
   const outSlider = createRangeSlider({

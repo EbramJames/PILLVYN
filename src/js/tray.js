@@ -1,3 +1,4 @@
+import { statusEmoji, withEmoji } from './emoji.js';
 import { applyAppearanceVars } from './theme.js';
 
 const { invoke } = window.__TAURI__?.core || {};
@@ -35,6 +36,9 @@ function fitWindowHeight(force = false) {
 function renderTrayState(snap) {
   if (!snap) return;
 
+  const showEmojis = snap.show_emojis !== false;
+  document.body.classList.toggle('reduced-motion', Boolean(snap.reduced_motion));
+
   applyAppearanceVars(
     {
       theme: snap.theme,
@@ -46,41 +50,51 @@ function renderTrayState(snap) {
 
   const verEl = document.getElementById('tray-version');
   if (verEl && snap.version) {
-    verEl.textContent = `v${snap.version}`;
+    const nextVer = `v${snap.version}`;
+    if (verEl.textContent !== nextVer) verEl.textContent = nextVer;
   }
 
   const dotEl = document.getElementById('tray-live-dot');
   const statusLine = document.getElementById('tray-status-line');
   if (dotEl && statusLine) {
     dotEl.className = 'tray-status-dot';
+    let nextStatus = '';
     if (!snap.visible) {
       dotEl.classList.add('is-hidden');
-      statusLine.textContent = 'Island Hidden';
+      nextStatus = withEmoji(statusEmoji('hidden', showEmojis), 'Island Hidden');
     } else if (snap.dnd) {
       dotEl.classList.add('is-dnd');
-      statusLine.textContent = 'Do Not Disturb On';
+      nextStatus = withEmoji(statusEmoji('dnd', showEmojis), 'Do Not Disturb On');
     } else if (snap.focus_mode) {
       dotEl.classList.add('is-online');
-      statusLine.textContent = 'Focus Mode Active';
+      nextStatus = withEmoji(statusEmoji('focus', showEmojis), 'Focus Mode Active');
     } else {
       dotEl.classList.add('is-online');
       const liveText = snap.active_activities > 0
         ? `${snap.active_activities} Live ${snap.active_activities === 1 ? 'Activity' : 'Activities'}`
         : 'All systems synced';
-      statusLine.textContent = liveText;
+      nextStatus = withEmoji(statusEmoji('online', showEmojis), liveText);
     }
+    if (statusLine.textContent !== nextStatus) statusLine.textContent = nextStatus;
   }
 
   const mediaBar = document.getElementById('tray-now-playing');
   const mediaText = document.getElementById('tray-media-text');
+  const trayEq = mediaBar?.querySelector('.tray-eq');
   if (mediaBar && mediaText) {
     if (snap.media_active && snap.media_title) {
       mediaBar.classList.remove('is-hidden');
-      mediaText.textContent = snap.media_artist
-        ? `${snap.media_title} · ${snap.media_artist}`
-        : snap.media_title;
+      const isPlaying = snap.media_status === 'Playing';
+      trayEq?.classList.toggle('is-playing', isPlaying);
+      const mediaEmoji = statusEmoji(isPlaying ? 'playing' : 'paused', showEmojis);
+      const nextMedia = withEmoji(
+        mediaEmoji,
+        snap.media_artist ? `${snap.media_title} · ${snap.media_artist}` : snap.media_title
+      );
+      if (mediaText.textContent !== nextMedia) mediaText.textContent = nextMedia;
     } else {
       mediaBar.classList.add('is-hidden');
+      trayEq?.classList.remove('is-playing');
     }
   }
 
@@ -88,12 +102,14 @@ function renderTrayState(snap) {
   const visLabel = document.getElementById('tray-vis-label');
   const visSwitch = document.getElementById('tray-vis-switch');
   if (visBtn && visLabel && visSwitch) {
+    const iconKey = snap.visible ? 'eye' : 'eyeOff';
     visBtn.setAttribute('aria-checked', String(Boolean(snap.visible)));
-    visLabel.textContent = 'Island Visible';
+    if (visLabel.textContent !== 'Island Visible') visLabel.textContent = 'Island Visible';
     visSwitch.classList.toggle('is-on', Boolean(snap.visible));
     const iconHolder = visBtn.querySelector('.tray-icon');
-    if (iconHolder) {
-      iconHolder.innerHTML = snap.visible ? TRAY_ICONS.eye : TRAY_ICONS.eyeOff;
+    if (iconHolder && iconHolder.dataset.iconKey !== iconKey) {
+      iconHolder.dataset.iconKey = iconKey;
+      iconHolder.innerHTML = TRAY_ICONS[iconKey];
     }
   }
 

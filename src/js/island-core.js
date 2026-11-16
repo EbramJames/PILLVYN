@@ -1,5 +1,8 @@
+import { activityEmoji, respectsShowEmojis, statusEmoji, withEmoji } from './emoji.js';
 import { applyAppearanceVars } from './theme.js';
 import { clear, el, formatSpeed, formatTimeShort, icon } from './utils.js';
+
+const COMPACT_RING_CIRC = 53.407;
 
 export const MODULE_TABS = [
   { id: 'overview', label: 'Hub', icon: 'home' },
@@ -70,17 +73,21 @@ export function renderCompactAndMinimized(store, api) {
     : null;
   const minimalIdle = store.config?.appearance?.minimal_idle !== false;
   const hoverPeek = store.config?.appearance?.hover_peek !== false;
+  const showEmojis = respectsShowEmojis(store.config);
+  const hasSmsTop = topAct?.kind === 'sms';
 
   // Minimized pill (clean micro status + time, no noisy uppercase IDLE)
   const miniDot = document.getElementById('mini-dot');
   const miniTime = document.getElementById('mini-time');
   const miniLabel = document.getElementById('mini-label');
   if (miniTime.textContent !== nowStr) miniTime.textContent = nowStr;
-  const miniDotCls = 'mini-dot' + (dnd ? ' dnd' : media?.status === 'Playing' ? ' playing' : '');
+  const miniDotCls = 'mini-dot' + (dnd ? ' dnd' : hasSmsTop ? ' sms' : media?.status === 'Playing' ? ' playing' : '');
   if (miniDot.className !== miniDotCls) miniDot.className = miniDotCls;
   const miniLabelText = dnd
-    ? 'DND'
-    : (topAct && topAct.kind !== 'media' ? (topAct.badge || '') : '');
+    ? withEmoji(statusEmoji('dnd', showEmojis), 'DND')
+    : (topAct && topAct.kind !== 'media'
+        ? withEmoji(activityEmoji(topAct.kind, {}, showEmojis), topAct.badge || '')
+        : '');
   if (miniLabel.textContent !== miniLabelText) miniLabel.textContent = miniLabelText;
 
   // Header clock + active profile pill
@@ -102,6 +109,8 @@ export function renderCompactAndMinimized(store, api) {
   const eqEl = document.getElementById('compact-eq');
   const chipEl = document.getElementById('compact-chip');
   const peekEl = document.getElementById('compact-peek');
+  const ringWrapEl = document.getElementById('compact-ring-wrap');
+  const ringArcEl = document.getElementById('compact-ring-arc');
   const progEl = document.getElementById('compact-progress');
   const progFillEl = document.getElementById('compact-progress-fill');
 
@@ -109,22 +118,25 @@ export function renderCompactAndMinimized(store, api) {
   if (media?.active && media.thumbnail_data_url && (!topAct || topAct.kind === 'media')) {
     nextArtKey = `thumb:${media.thumbnail_data_url}`;
   } else if (topAct && topAct.kind !== 'media') {
-    const iconName = topAct.kind === 'download'
-      ? 'download'
-      : topAct.kind === 'timer'
-        ? 'clock'
-        : topAct.kind === 'gaming'
-          ? 'gamepad'
-          : topAct.kind === 'notification'
-            ? 'bell'
-            : topAct.kind === 'system_hud'
-              ? (topAct.title === 'Muted' ? 'mute' : topAct.title === 'Brightness' ? 'sun' : 'volume')
-              : 'layers';
+    const iconName = topAct.kind === 'sms'
+      ? 'messageCircle'
+      : topAct.kind === 'download'
+        ? 'download'
+        : topAct.kind === 'timer'
+          ? 'clock'
+          : topAct.kind === 'gaming'
+            ? 'gamepad'
+            : topAct.kind === 'notification'
+              ? 'bell'
+              : topAct.kind === 'system_hud'
+                ? (topAct.title === 'Muted' ? 'mute' : topAct.title === 'Brightness' ? 'sun' : 'volume')
+                : 'layers';
     nextArtKey = `ico:${iconName}`;
   } else if (media?.active) {
     nextArtKey = 'ico:music';
   }
 
+  artWrap.classList.toggle('is-sms-badge', Boolean(hasSmsTop));
   if (artWrap.dataset.artKey !== nextArtKey) {
     artWrap.dataset.artKey = nextArtKey;
     clear(artWrap);
@@ -143,13 +155,18 @@ export function renderCompactAndMinimized(store, api) {
   let nextTitle = '';
   let nextSub = '';
   if (topAct && topAct.kind !== 'media') {
-    nextTitle = topAct.title;
+    const actEmoji = activityEmoji(
+      topAct.kind,
+      { title: topAct.title, completed: topAct.progress === 1 },
+      showEmojis
+    );
+    nextTitle = withEmoji(actEmoji, topAct.title);
     nextSub = topAct.subtitle || '';
   } else if (media?.active) {
-    nextTitle = media.title || 'Now Playing';
+    nextTitle = withEmoji(activityEmoji('media', { status: media.status }, showEmojis), media.title || 'Now Playing');
     nextSub = media.artist || media.source_app || '';
   } else if (store.gaming?.active) {
-    nextTitle = store.gaming.game_title || 'Gaming Focus';
+    nextTitle = withEmoji(statusEmoji('gaming', showEmojis), store.gaming.game_title || 'Gaming Focus');
     nextSub = store.gaming.notifications_suppressed ? 'Notifications Muted' : 'Game Mode';
   } else {
     nextTitle = store.activeProfile?.name || 'PILLVYN';
@@ -162,7 +179,7 @@ export function renderCompactAndMinimized(store, api) {
         nextSub = `CPU ${Math.round(hw.cpu_usage_percent)}% · RAM ${Math.round(hw.ram_percent)}%`;
       }
     } else {
-      nextSub = dnd ? 'Do Not Disturb' : '';
+      nextSub = dnd ? withEmoji(statusEmoji('dnd', showEmojis), 'Do Not Disturb') : '';
     }
   }
   if (titleEl.textContent !== nextTitle) titleEl.textContent = nextTitle;
@@ -217,21 +234,32 @@ export function renderCompactAndMinimized(store, api) {
   let nextChip = nowStr;
   let nextChipCls = 'compact-chip';
   if (topAct?.badge && topAct.kind !== 'media') {
-    nextChip = topAct.badge;
+    nextChip = topAct.kind === 'sms'
+      ? withEmoji(activityEmoji('sms', {}, showEmojis), topAct.badge)
+      : topAct.badge;
     nextChipCls = 'compact-chip accent';
   } else if (dnd) {
-    nextChip = 'DND';
+    nextChip = withEmoji(statusEmoji('dnd', showEmojis), 'DND');
     nextChipCls = 'compact-chip accent';
   }
   if (chipEl.textContent !== nextChip) chipEl.textContent = nextChip;
   if (chipEl.className !== nextChipCls) chipEl.className = nextChipCls;
 
-  // Subtle hairline bottom progress indicator on Compact pill
+  // Live Activity radial SVG progress ring + subtle bottom hairline indicator
   let pct = null;
   if (topAct?.progress != null) {
     pct = Math.max(0, Math.min(100, topAct.progress * 100));
   } else if (media?.active && media.duration_sec > 1) {
     pct = Math.max(0, Math.min(100, (media.position_sec / media.duration_sec) * 100));
+  }
+  if (ringWrapEl && ringArcEl) {
+    ringWrapEl.classList.toggle('visible', pct != null);
+    if (pct != null) {
+      const dashOffset = (COMPACT_RING_CIRC * (1 - pct / 100)).toFixed(2);
+      if (ringArcEl.style.strokeDashoffset !== dashOffset) {
+        ringArcEl.style.strokeDashoffset = dashOffset;
+      }
+    }
   }
   progEl.classList.toggle('visible', pct != null);
   if (pct != null) {
@@ -242,21 +270,28 @@ export function renderCompactAndMinimized(store, api) {
 
 export function renderActivitiesStrip(store, onPickActivity) {
   const strip = document.getElementById('activities-strip');
+  const showEmojis = respectsShowEmojis(store.config);
   const items = store.activities || [];
-  const stripKey = items.map((a) => `${a.id}|${a.badge || ''}|${a.title}|${a.subtitle || ''}`).join(';');
+  const stripKey = `${showEmojis ? 1 : 0};${items.map((a) => `${a.id}|${a.kind}|${a.badge || ''}|${a.title}|${a.subtitle || ''}`).join(';')}`;
   if (strip.dataset.stripKey === stripKey) return;
   strip.dataset.stripKey = stripKey;
   clear(strip);
   if (items.length === 0) return;
 
   for (const act of items) {
+    const isSms = act.kind === 'sms';
+    const actEmoji = activityEmoji(act.kind, { completed: act.progress === 1 }, showEmojis);
+    const badgeLabel = act.badge || act.kind.toUpperCase();
     strip.appendChild(
       el('button', {
         class: 'activity-pill',
         title: `${act.title}${act.subtitle ? ` — ${act.subtitle}` : ''}`,
         onClick: () => onPickActivity(act),
       }, [
-        el('span', { class: 'activity-badge', text: act.badge || act.kind.toUpperCase() }),
+        el('span', {
+          class: `activity-badge ${isSms ? 'is-sms' : ''}`,
+          text: withEmoji(actEmoji, badgeLabel),
+        }),
         el('span', { class: 'activity-text', text: act.title }),
       ])
     );

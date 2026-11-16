@@ -46,6 +46,7 @@ PILLVYN/
 - **Audio & Display (`system_ctrl.rs`)**: WASAPI `IAudioEndpointVolumeCallback` / `IMMNotificationClient`, Windows COM `IWbemLocator` / DDC-CI brightness, power status, and `GetIfTable2` IEEE 802.11 status.
 - **Hardware (`hardware.rs`)**: `sysinfo` CPU + RAM + Disk telemetry, cached DXGI adapter enumeration, PDH 3D engine GPU fallback, and NVIDIA NVML telemetry where available.
 - **Gaming & Downloads (`gaming.rs`, `downloads.rs`)**: Lightweight process CPU/memory scans + native Win32 registry Steam AppID/path lookups (`RegGetValueW`) without DLL injection, plus 30s-cached Steam `.acf` & browser partial download tracking.
+- **Alerts, SMS Ding & Audio (`notifications.rs`, `sound.rs`)**: SMS/messaging classification, event-checked WinRT Action Center watcher when granted MSIX identity, DND/Focus suppression, and synthesized in-memory PCM bell chimes via `Win32 PlaySoundW`.
 - **Window Hooks & Clipboard (`win_hooks.rs`, `clipboard.rs`)**: `SetWinEventHook` foreground tracking, `SHQueryUserNotificationState` fullscreen checks, and `AddClipboardFormatListener` with sensitive token filtering.
 
 ### Windows Startup Lifecycle

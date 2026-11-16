@@ -1,6 +1,6 @@
 [package]
 name = "pillvyn"
-version = "1.5.0"
+version = "2.0.0"
 description = "PILLVYN — Premium, lightweight Dynamic Island for Windows 10 and Windows 11"
 authors = ["PILLVYN Contributors"]
 license = "MIT"
@@ -38,6 +38,7 @@ sha2 = "0.10"
 windows-core = "0.58"
 windows = { version = "0.58", features = [
   "implement",
+  "ApplicationModel",
   "Foundation",
   "Foundation_Collections",
   "Media_Control",

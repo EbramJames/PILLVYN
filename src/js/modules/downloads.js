@@ -1,12 +1,14 @@
+import { respectsShowEmojis, statusEmoji, withEmoji } from '../emoji.js';
 import { clampPercent, el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
 
 export function renderDownloads(store) {
   const dl = store.downloads;
+  const showEmojis = respectsShowEmojis(store.config);
   if (!dl || !dl.items || dl.items.length === 0) {
     return el('div', { class: 'stack' }, [
       el('div', { class: 'empty-state' }, [
         icon('download', 24),
-        el('div', { style: { marginTop: '8px', fontWeight: '600', color: 'var(--text-primary)' }, text: 'No Active Downloads' }),
+        el('div', { style: { marginTop: '8px', fontWeight: '600', color: 'var(--text-primary)' }, text: withEmoji(statusEmoji('download', showEmojis), 'No Active Downloads') }),
         el('div', { class: 'muted', style: { marginTop: '4px' }, text: 'Live progress automatically appears when Chrome, Edge, Firefox, Opera, or Steam downloads are active.' }),
       ]),
       dl?.watched_sources?.length
@@ -21,14 +23,14 @@ export function renderDownloads(store) {
       ? `${formatBytes(item.downloaded_bytes)} / ${formatBytes(item.total_bytes)}`
       : formatBytes(item.downloaded_bytes);
     const metaRight = item.status === 'completed'
-      ? 'Completed'
+      ? withEmoji(statusEmoji('completed', showEmojis), 'Completed')
       : `${formatSpeed(item.speed_bps)}${item.eta_seconds != null ? ` · ETA ${formatDuration(item.eta_seconds)}` : ''}`;
 
     return el('div', { class: 'glass-card' }, [
       el('div', { class: 'card-title-row' }, [
         el('span', {
           style: { fontWeight: '600', fontSize: '12.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-          text: item.name,
+          text: withEmoji(statusEmoji(item.status === 'completed' ? 'completed' : 'download', showEmojis), item.name),
         }),
         el('span', { class: `badge ${item.status === 'completed' ? 'ok' : 'warn'}`, text: pct != null ? `${pct}%` : item.source }),
       ]),

@@ -27,10 +27,10 @@
 
     <main id="top">
       <section class="hero">
-        <div class="pill-tag">v1.5.0 · Open Source · Rust + Tauri 2 · Windows 10 / 11 (x64)</div>
-        <h1>A Quiet Obsidian Capsule at the Top of Windows.</h1>
+        <div class="pill-tag">v2.0.0 · Open Source · Rust + Tauri 2 · Windows 10 / 11 (x64)</div>
+        <h1>A Fluid Obsidian Capsule at the Top of Windows.</h1>
         <p class="hero-copy">
-          PILLVYN brings a refined, gesture-first Dynamic Island to your desktop — uniting event-driven Windows media controls, WASAPI audio callbacks, hardware &amp; GPU telemetry, Steam/browser downloads, clipboard history, and gaming focus into a calm, near-zero-idle hub.
+          PILLVYN v2.0.0 brings an Apple-inspired Dynamic Island to Windows — uniting elastic spring transitions, SMS arrival "ding" audio + luminous shimmer alerts, intuitive emojis, event-driven Windows media controls, WASAPI audio, hardware telemetry, downloads, and gaming focus.
         </p>
 
         <div class="hero-actions">
@@ -43,6 +43,7 @@
             <button class="demo-chip active" data-demo-state="compact">Compact Pill</button>
             <button class="demo-chip" data-demo-state="expanded">Expanded Hub</button>
             <button class="demo-chip" data-demo-state="minimized">Minimized Notch</button>
+            <button class="demo-ding-btn" id="btn-demo-ding" type="button">💬 Trigger SMS Ding</button>
             <span class="demo-divider"></span>
             <button class="demo-theme active" data-demo-theme="obsidian">Obsidian</button>
             <button class="demo-theme" data-demo-theme="aurora">Aurora</button>
@@ -53,80 +54,84 @@
             <div class="dc-mini">
               <span class="dc-dot"></span>
               <span>21:42</span>
-              <span class="dc-muted">LIVE</span>
+              <span class="dc-muted" id="dc-mini-badge">🎵 LIVE</span>
             </div>
             <div class="dc-compact">
-              <div class="dc-art">♪</div>
+              <div class="dc-art" id="dc-art">🎵</div>
               <div class="dc-meta">
-                <strong>Windows GSMTC Media</strong>
-                <span>Click Expanded Hub to inspect modules</span>
+                <strong id="dc-title">🎵 Windows GSMTC Media</strong>
+                <span id="dc-sub">Click Trigger SMS Ding or Expanded Hub</span>
               </div>
+              <svg class="dc-ring" viewBox="0 0 22 22" aria-hidden="true">
+                <circle class="dc-ring-track" cx="11" cy="11" r="8.5"></circle>
+                <circle class="dc-ring-arc" cx="11" cy="11" r="8.5"></circle>
+              </svg>
               <div class="dc-eq"><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="dc-expanded">
               <div class="dc-exp-head">
-                <span class="dc-brand">PILLVYN</span>
+                <span class="dc-brand">✨ PILLVYN</span>
                 <div class="dc-badges">
-                  <span>Media</span>
-                  <span>System</span>
-                  <span>Hardware</span>
-                  <span>Game</span>
+                  <span>🎵 Media</span>
+                  <span>🔊 System</span>
+                  <span>⚙️ Hardware</span>
+                  <span>🎮 Game</span>
                 </div>
               </div>
               <div class="dc-exp-grid">
                 <div class="dc-tile">
-                  <small>NOW PLAYING</small>
+                  <small>🎵 NOW PLAYING</small>
                   <strong>Spotify · GSMTC</strong>
                   <div class="dc-bar"><i style="width: 64%"></i></div>
                 </div>
                 <div class="dc-tile">
-                  <small>SYSTEM</small>
+                  <small>🔊 SYSTEM</small>
                   <strong>WASAPI + DDC/CI</strong>
                   <div class="dc-bar"><i style="width: 78%"></i></div>
                 </div>
                 <div class="dc-tile">
-                  <small>HARDWARE</small>
+                  <small>⚙️ HARDWARE</small>
                   <strong>NVML / DXGI / PDH</strong>
                   <div class="dc-bar"><i style="width: 42%"></i></div>
                 </div>
                 <div class="dc-tile">
-                  <small>NETWORK</small>
-                  <strong>GetIfTable2 + ICMP</strong>
-                  <div class="dc-bar"><i style="width: 55%"></i></div>
+                  <small>💬 ALERTS</small>
+                  <strong>SMS Ding · Chime Ready</strong>
+                  <div class="dc-bar"><i style="width: 88%"></i></div>
                 </div>
               </div>
             </div>
           </div>
-          <p class="demo-caption">Interactive UI state preview — full native Windows telemetry runs inside the installed desktop application.</p>
+          <p class="demo-caption">Interactive v2.0.0 capsule preview — try triggering an SMS ding or switching capsule states.</p>
         </div>
       </section>
 
       <section id="features" class="section">
-        <h2>Engineered for Speed, Minimalism &amp; Windows Sync</h2>
+        <h2>Engineered for Fluid Motion, Minimalism &amp; Windows Sync</h2>
         <div class="feature-grid">
           <article class="feature-card">
-            <h3>Dynamic Island &amp; Gestures</h3>
-            <p>Frameless Quiet Obsidian Glass capsule with Minimized, Compact, and Expanded spring states, hover-to-peek controls, scroll volume, pointer swipe gestures, Pin lock, and click-outside dismissal.</p>
+            <h3>✨ Apple-Inspired Spring Motion</h3>
+            <p>Elastic spring morphing across Minimized, Compact, and Expanded states with directional tab slides, hover-to-peek glide, circular Live Activity ring, and frosted album glow.</p>
           </article>
           <article class="feature-card">
-            <h3>Multi-Session Media (GSMTC)</h3>
-            <p>Event-driven WinRT track &amp; timeline updates, extracted album artwork, and instant session switcher chips across Spotify, Edge, Chrome, Firefox, Opera, and VLC.</p>
+            <h3>💬 SMS Arrival "Ding" Effect</h3>
+            <p>Incoming SMS &amp; messaging notifications trigger a studio-tuned PCM double-bell chime plus luminous capsule halo shimmer — muted automatically during Do Not Disturb.</p>
           </article>
           <article class="feature-card">
-            <h3>WASAPI Audio &amp; System</h3>
-            <p>COM callback volume &amp; mute HUD sync, default output/input device switching (`IPolicyConfig`), cached WMI + DDC/CI brightness, battery status, and Windows connectivity links.</p>
+            <h3>🎵 Multi-Session Media &amp; Audio</h3>
+            <p>Event-driven WinRT GSMTC playback with extracted covers alongside WASAPI volume/mute callbacks, device switching, and cached DDC/CI brightness.</p>
           </article>
           <article class="feature-card">
-            <h3>Segmented Monitor Hub</h3>
+            <h3>⚙️ Segmented Monitor Hub</h3>
             <p>Unified Monitor drawer uniting CPU, RAM, disks, DXGI/PDH/NVML GPU telemetry, network `GetIfTable2` + ICMP latency + VPN status, and active downloads.</p>
           </article>
           <article class="feature-card">
-            <h3>Anti-Cheat Safe Gaming Sync</h3>
-            <p>Native Win32 `SetWinEventHook`, `SHQueryUserNotificationState`, and `RegGetValueW` Steam detection auto-applies profiles and focus without DLL injection or child processes.</p>
+            <h3>🎮 Anti-Cheat Safe Gaming Sync</h3>
+            <p>Native Win32 `SetWinEventHook`, `SHQueryUserNotificationState`, and `RegGetValueW` Steam detection auto-applies profiles and focus without DLL injection.</p>
           </article>
           <article class="feature-card">
-            <h3>Clipboard, Tools &amp; Plugins</h3>
-            <p>Zero-polling `AddClipboardFormatListener` history, timers &amp; Open-Meteo weather, quick shortcuts, local `plugin.json` cards, and strictly opt-in local Ollama AI.</p>
+            <h3>🌦️ Clipboard, Tools &amp; Plugins</h3>
+            <p>Zero-polling `AddClipboardFormatListener` history, intuitive weather &amp; timers, quick shortcuts, local `plugin.json` cards, and strictly opt-in local Ollama AI.</p>
           </article>
         </div>
       </section>
@@ -178,10 +183,10 @@
       </section>
 
       <section id="install" class="section install-box">
-        <h2>Install PILLVYN v1.5.0 on Windows 10 / 11</h2>
+        <h2>Install PILLVYN v2.0.0 on Windows 10 / 11</h2>
         <p>Packaged as a standalone x64 NSIS setup executable with automatic Windows Startup registration, Start Menu &amp; Desktop shortcuts, clean upgrade shutdown hooks, SHA-256 verification, and WebView2 check.</p>
         <div class="code-box">
-          <code>GitHub Releases → PILLVYN_1.5.0_x64-setup.exe</code>
+          <code>GitHub Releases → PILLVYN_2.0.0_x64-setup.exe</code>
         </div>
         <div class="hero-actions" style="margin-top: 20px;">
           <a href="https://github.com/EbramJames/PILLVYN/releases/latest" class="btn-primary">Get Latest Installer</a>

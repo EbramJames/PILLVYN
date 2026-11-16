@@ -8,6 +8,7 @@ pub mod media;
 pub mod network;
 pub mod notifications;
 pub mod plugins;
+pub mod sound;
 pub mod system_ctrl;
 pub mod updater;
 pub mod widgets;

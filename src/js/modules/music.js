@@ -1,11 +1,13 @@
+import { activityEmoji, respectsShowEmojis, withEmoji } from '../emoji.js';
 import { createRangeSlider, el, formatDuration, icon } from '../utils.js';
 
 export function renderMusic(store, api) {
   const media = store.media;
+  const showEmojis = respectsShowEmojis(store.config);
   if (!media || !media.active) {
     return el('div', { class: 'empty-state' }, [
       icon('music', 22),
-      el('div', { style: { marginTop: '8px', fontWeight: '600', color: 'var(--text-primary)' }, text: 'No Active Media Session' }),
+      el('div', { style: { marginTop: '8px', fontWeight: '600', color: 'var(--text-primary)' }, text: withEmoji(showEmojis ? '🎧' : '', 'No Active Media Session') }),
       el('div', { class: 'muted', style: { marginTop: '4px' }, text: 'Start playback in Spotify, Chrome, Edge, Firefox, VLC, or Apple Music.' }),
     ]);
   }
@@ -23,7 +25,7 @@ export function renderMusic(store, api) {
           class: `session-chip ${s.is_active ? 'active' : ''}`,
           title: `${s.source_app}: ${s.title || 'Session'}`,
           onClick: () => api.mediaControl('select_session', null, s.source_id),
-        }, `${s.source_app}${s.status === 'Playing' ? ' · Live' : ''}`)
+        }, `${s.source_app}${s.status === 'Playing' ? (showEmojis ? ' · 🎵 Live' : ' · Live') : ''}`)
       ))
     );
   }
@@ -46,11 +48,17 @@ export function renderMusic(store, api) {
     },
   });
 
+  const hasArt = Boolean(media.thumbnail_data_url);
+  const statusEmojiChar = activityEmoji('media', { status: media.status }, showEmojis);
+
   root.appendChild(
     el('div', { class: 'glass-card' }, [
-      el('div', { class: 'music-hero' }, [
+      el('div', {
+        class: `music-hero ${hasArt ? 'has-art' : ''}`,
+        style: hasArt ? { '--album-art-bg': `url("${media.thumbnail_data_url}")` } : undefined,
+      }, [
         el('div', { class: 'album-art' }, [
-          media.thumbnail_data_url
+          hasArt
             ? el('img', { src: media.thumbnail_data_url, alt: media.title || 'Album cover' })
             : icon('music', 24),
         ]),
@@ -61,7 +69,7 @@ export function renderMusic(store, api) {
             ? el('div', { class: 'muted', style: { fontSize: '11px', marginTop: '2px' }, text: media.album })
             : null,
           el('span', { class: 'track-source' }, [
-            el('span', { text: `${media.source_app || 'Media'} · ${media.status}` }),
+            el('span', { text: withEmoji(statusEmojiChar, `${media.source_app || 'Media'} · ${media.status}`) }),
           ]),
         ]),
       ]),

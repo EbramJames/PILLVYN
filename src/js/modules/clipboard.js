@@ -1,3 +1,4 @@
+import { activityEmoji, respectsShowEmojis, withEmoji } from '../emoji.js';
 import { clear, el, formatRelativeTime, icon } from '../utils.js';
 
 let searchTerm = '';
@@ -6,6 +7,7 @@ export function renderClipboard(store, api) {
   const cb = store.clipboard;
   const enabled = cb?.enabled ?? true;
   const allItems = cb?.items || [];
+  const showEmojis = respectsShowEmojis(store.config);
 
   const listWrap = el('div', { class: 'stack', id: 'clipboard-list' });
 
@@ -19,7 +21,10 @@ export function renderClipboard(store, api) {
       listWrap.appendChild(
         el('div', { class: 'empty-state' }, [
           icon('clipboard', 22),
-          el('div', { style: { marginTop: '6px', fontWeight: '600', color: 'var(--text-primary)' }, text: searchTerm ? 'No Matching Entries' : 'Clipboard History Empty' }),
+          el('div', {
+            style: { marginTop: '6px', fontWeight: '600', color: 'var(--text-primary)' },
+            text: searchTerm ? 'No Matching Entries' : withEmoji(activityEmoji('clipboard', {}, showEmojis), 'Clipboard History Empty'),
+          }),
           el('div', { class: 'muted', style: { marginTop: '3px' }, text: 'Copy text or images anywhere in Windows to capture them here automatically.' }),
         ])
       );
@@ -45,7 +50,7 @@ export function renderClipboard(store, api) {
             el('div', {
               class: 'muted',
               style: { fontSize: '10px' },
-              text: `${item.kind === 'image' ? 'Image' : `${item.char_count || 0} chars`} · ${formatRelativeTime(item.timestamp_ms)}${item.pinned ? ' · Pinned' : ''}`,
+              text: `${item.kind === 'image' ? '🖼️ Image' : `${item.char_count || 0} chars`} · ${formatRelativeTime(item.timestamp_ms)}${item.pinned ? ` · ${withEmoji(activityEmoji('clipboard', { pinned: true }, showEmojis), 'Pinned')}` : ''}`.replace('🖼️ ', showEmojis ? '🖼️ ' : ''),
             }),
           ]),
           el('div', { style: { display: 'flex', gap: '4px', flexShrink: '0' } }, [

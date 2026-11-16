@@ -1,3 +1,4 @@
+import { respectsShowEmojis, statusEmoji, withEmoji } from '../emoji.js';
 import { el, icon } from '../utils.js';
 
 export function renderGaming(store, api) {
@@ -5,6 +6,7 @@ export function renderGaming(store, api) {
   if (!gm) {
     return el('div', { class: 'empty-state', text: 'Monitoring active processes and Steam game state…' });
   }
+  const showEmojis = respectsShowEmojis(store.config);
 
   const integ = gm.integrations || {};
   const badges = [
@@ -21,7 +23,7 @@ export function renderGaming(store, api) {
   return el('div', { class: 'stack' }, [
     el('div', { class: 'glass-card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('span', { class: 'card-label', text: 'Game Session' }),
+        el('span', { class: 'card-label', text: withEmoji(statusEmoji('gaming', showEmojis), 'Game Session') }),
         el('span', {
           class: `badge ${gm.active ? 'ok' : ''}`,
           text: gm.active ? 'ACTIVE' : 'STANDBY',
@@ -50,7 +52,9 @@ export function renderGaming(store, api) {
       el('div', { style: { display: 'flex', gap: '6px', marginTop: '9px', flexWrap: 'wrap' } }, [
         el('span', {
           class: `badge ${gm.notifications_suppressed ? 'warn' : ''}`,
-          text: gm.notifications_suppressed ? 'Notifications Suppressed' : 'Alerts Normal',
+          text: gm.notifications_suppressed
+            ? withEmoji(statusEmoji('dnd', showEmojis), 'Notifications Suppressed')
+            : 'Alerts Normal',
         }),
         el('button', {
           class: `pill-btn ${clickThrough ? 'primary' : ''}`,

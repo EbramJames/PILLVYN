@@ -31,6 +31,8 @@ const required = [
   'styles/settings.css',
   'styles/tray.css',
   'js/main.js',
+  'js/emoji.js',
+  'js/effects.js',
   'js/tray.js',
   'js/theme.js',
   'assets/fonts/inter-latin-wght-normal.woff2',

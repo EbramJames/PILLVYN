@@ -156,7 +156,8 @@ body {
 }
 
 .demo-chip,
-.demo-theme {
+.demo-theme,
+.demo-ding-btn {
   padding: 6px 13px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -164,6 +165,18 @@ body {
   color: var(--muted);
   cursor: pointer;
   font-size: 12.5px;
+  transition: background 160ms ease, color 160ms ease, transform 150ms cubic-bezier(0.25, 1.15, 0.4, 1);
+}
+
+.demo-ding-btn {
+  color: #99f6e4;
+  border-color: rgba(56, 217, 192, 0.36);
+  background: rgba(56, 217, 192, 0.14);
+}
+
+.demo-ding-btn:hover {
+  background: rgba(56, 217, 192, 0.24);
+  transform: translateY(-1px);
 }
 
 .demo-chip.active,
@@ -181,15 +194,49 @@ body {
 }
 
 .demo-capsule {
-  width: 320px;
+  position: relative;
+  width: 332px;
   min-height: 46px;
   border-radius: 999px;
   background: rgba(11, 14, 22, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  transition: all 360ms cubic-bezier(0.22, 1.24, 0.36, 1);
+  transition: all 380ms cubic-bezier(0.32, 1.24, 0.44, 1);
   overflow: hidden;
   padding: 0 14px;
+}
+
+.demo-capsule.is-ding-sms {
+  border-color: rgba(56, 217, 192, 0.72);
+  animation: demoDingBounce 650ms cubic-bezier(0.32, 1.24, 0.44, 1);
+}
+
+@keyframes demoDingBounce {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(56, 217, 192, 0.55), 0 24px 50px rgba(0, 0, 0, 0.65); }
+  35% { transform: scale(1.045); box-shadow: 0 0 0 7px rgba(56, 217, 192, 0.22), 0 24px 50px rgba(16, 185, 129, 0.3); }
+  100% { transform: scale(1); box-shadow: 0 0 0 14px transparent, 0 24px 50px rgba(0, 0, 0, 0.65); }
+}
+
+.dc-ring {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.dc-ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 2.3;
+}
+
+.dc-ring-arc {
+  fill: none;
+  stroke: #5b8cff;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-dasharray: 53.407;
+  stroke-dashoffset: 18;
 }
 
 .demo-capsule[data-theme="aurora"] {

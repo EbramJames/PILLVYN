@@ -64,8 +64,16 @@ export function el(tag, attrs = {}, children = []) {
       node.addEventListener(k.slice(2).toLowerCase(), v);
     } else if (k === 'style' && typeof v === 'object') {
       Object.assign(node.style, v);
+    } else if (k === 'disabled') {
+      node.disabled = Boolean(v);
+    } else if (k === 'checked') {
+      node.checked = Boolean(v);
+    } else if (k === 'selected') {
+      node.selected = Boolean(v);
+    } else if (k === 'value') {
+      node.value = String(v);
     } else {
-      node.setAttribute(k, String(v));
+      node.setAttribute(k, v === true ? '' : String(v));
     }
   }
   const arr = Array.isArray(children) ? children : [children];
@@ -142,6 +150,7 @@ const ICON_PATHS = {
   wifi: ['M5 12.55a11 11 0 0 1 14.08 0', 'M1.42 9a16 16 0 0 1 21.16 0', 'M8.53 16.11a6 6 0 0 1 6.95 0', 'M12 20h.01'],
   bell: ['M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
   bellOff: ['M13.73 21a2 2 0 0 1-3.46 0', 'M18.63 13A17.89 17.89 0 0 1 18 8', 'M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14', 'M18 8a6 6 0 0 0-9.33-5', 'M1 1l22 22'],
+  messageCircle: ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z'],
   zap: ['M13 2L3 14h9l-1 8 10-12h-9l1-8z'],
   clock: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z', 'M12 6v6l4 2'],
   grid: ['M3 3h7v7H3z', 'M14 3h7v7h-7z', 'M14 14h7v7h-7z', 'M3 14h7v7H3z'],

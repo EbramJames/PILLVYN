@@ -68,13 +68,19 @@
   --status-danger: #f87171;
   --status-info: #60a5fa;
 
-  --spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.32, 1.24, 0.44, 1);
+  --spring-snappy: cubic-bezier(0.25, 1.15, 0.4, 1);
   --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-liquid: cubic-bezier(0.16, 1, 0.3, 1);
 
   --shadow-island:
     0 18px 40px rgba(0, 0, 0, 0.58),
     0 4px 12px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 var(--specular-top);
+  --shadow-island-expanded:
+    0 24px 54px rgba(0, 0, 0, 0.68),
+    0 8px 20px rgba(0, 0, 0, 0.40),
+    inset 0 1px 0 rgba(255, 255, 255, 0.20);
 }
 
 [data-theme="aurora"] {

@@ -18,10 +18,12 @@
 
 .glass-card {
   padding: 10px 12px;
-  border-radius: 14px;
-  background: var(--surface-subtle);
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.036) 0%, rgba(255, 255, 255, 0.018) 100%);
   border: 1px solid var(--border-subtle);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
   contain: layout style;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .card-title-row {
@@ -65,12 +67,16 @@
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 150ms ease, transform 120ms ease, border-color 150ms ease;
+  transition:
+    background 160ms var(--ease-liquid, cubic-bezier(0.16, 1, 0.3, 1)),
+    transform 160ms var(--spring-snappy, cubic-bezier(0.25, 1.15, 0.4, 1)),
+    border-color 160ms ease;
 }
 
 .pill-btn:hover {
   background: var(--surface-elevated-hover);
   border-color: var(--border-glass);
+  transform: translateY(-0.5px);
 }
 
 .pill-btn:active {
@@ -197,9 +203,37 @@
 
 /* Music Player */
 .music-hero {
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
+  padding: 6px;
+  margin: -4px;
+  border-radius: 13px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.music-hero.has-art::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  background-image: var(--album-art-bg);
+  background-size: cover;
+  background-position: center;
+  filter: blur(22px) saturate(155%);
+  opacity: 0.24;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.music-hero.has-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, rgba(8, 10, 16, 0.35), rgba(8, 10, 16, 0.68));
+  z-index: -1;
+  pointer-events: none;
 }
 
 .album-art {
@@ -339,13 +373,24 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: 13px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-subtle);
+  transition:
+    background 160ms var(--ease-liquid, cubic-bezier(0.16, 1, 0.3, 1)),
+    border-color 160ms ease,
+    transform 160ms var(--spring-snappy, cubic-bezier(0.25, 1.15, 0.4, 1));
 }
 
 .list-item:hover {
+  background: rgba(255, 255, 255, 0.045);
   border-color: var(--border-glass);
+}
+
+.list-item.is-sms-item {
+  background: linear-gradient(120deg, rgba(56, 217, 192, 0.11), rgba(91, 140, 255, 0.08));
+  border-color: rgba(56, 217, 192, 0.34);
+  box-shadow: inset 0 1px 0 rgba(56, 217, 192, 0.16);
 }
 
 .badge {
@@ -377,6 +422,12 @@
   background: rgba(248, 113, 113, 0.16);
   border-color: rgba(248, 113, 113, 0.35);
   color: #fecaca;
+}
+
+.badge.sms {
+  background: rgba(56, 217, 192, 0.18);
+  border-color: rgba(56, 217, 192, 0.45);
+  color: #99f6e4;
 }
 
 .action-tile {

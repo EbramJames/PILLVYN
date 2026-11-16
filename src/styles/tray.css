@@ -166,6 +166,7 @@ button {
   width: 2px;
   border-radius: 2px;
   background: var(--accent);
+  transition: height 180ms ease;
 }
 
 .tray-eq span:nth-child(1) {
@@ -178,6 +179,23 @@ button {
 
 .tray-eq span:nth-child(3) {
   height: 7px;
+}
+
+.tray-eq.is-playing span:nth-child(1) {
+  animation: trayEq 0.78s ease-in-out infinite alternate;
+}
+
+.tray-eq.is-playing span:nth-child(2) {
+  animation: trayEq 0.56s ease-in-out 0.14s infinite alternate;
+}
+
+.tray-eq.is-playing span:nth-child(3) {
+  animation: trayEq 0.68s ease-in-out 0.24s infinite alternate;
+}
+
+@keyframes trayEq {
+  0% { height: 3px; opacity: 0.65; }
+  100% { height: 11px; opacity: 1; }
 }
 
 .tray-section {
@@ -206,18 +224,19 @@ button {
   font-weight: 500;
   text-align: left;
   transition:
-    background 130ms ease,
-    color 130ms ease,
-    transform 100ms ease;
+    background 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 140ms ease,
+    transform 160ms cubic-bezier(0.25, 1.15, 0.4, 1);
 }
 
 .tray-item:hover,
 .tray-item:focus-visible {
-  background: rgba(255, 255, 255, 0.085);
+  background: rgba(255, 255, 255, 0.09);
+  transform: translateX(1.5px);
 }
 
 .tray-item:active {
-  transform: scale(0.985);
+  transform: scale(0.975);
 }
 
 .tray-item.is-danger {

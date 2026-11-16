@@ -1,6 +1,8 @@
+import { respectsShowEmojis, statusEmoji, weatherEmoji, withEmoji } from '../emoji.js';
 import { el, formatDuration, formatTimeShort, icon } from '../utils.js';
 
 export function renderWidgets(store, api) {
+  const showEmojis = respectsShowEmojis(store.config);
   const use24h = store.config?.widgets?.clock_24h ?? true;
   const now = new Date();
   const dateStr = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
@@ -28,11 +30,12 @@ export function renderWidgets(store, api) {
   });
 
   const swSec = Math.floor((store.stopwatchMs || 0) / 1000);
+  const wxEmoji = weatherEmoji(weather?.condition, showEmojis);
 
   const root = el('div', { class: 'stack' }, [
     el('div', { class: 'grid-2' }, [
       el('div', { class: 'glass-card' }, [
-        el('div', { class: 'card-label', text: 'Clock & Date' }),
+        el('div', { class: 'card-label', text: withEmoji(statusEmoji('clock', showEmojis), 'Clock & Date') }),
         el('div', { class: 'card-value', style: { fontSize: '20px', marginTop: '3px' }, text: formatTimeShort(now, use24h) }),
         el('div', { class: 'muted', text: dateStr }),
       ]),
@@ -47,7 +50,7 @@ export function renderWidgets(store, api) {
             onClick: () => api.refreshWeather(),
           }, store.weatherLoading ? 'Syncing…' : 'Sync'),
         ]),
-        el('div', { class: 'card-value', style: { fontSize: '18px' }, text: `${tempDisplay} · ${weather?.condition || 'Offline'}` }),
+        el('div', { class: 'card-value', style: { fontSize: '18px' }, text: `${withEmoji(wxEmoji, tempDisplay)} · ${weather?.condition || 'Offline'}` }),
         el('div', {
           class: 'muted',
           style: { fontSize: '10.5px' },
@@ -60,7 +63,7 @@ export function renderWidgets(store, api) {
 
     el('div', { class: 'glass-card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('span', { class: 'card-label', text: 'Stopwatch' }),
+        el('span', { class: 'card-label', text: withEmoji(statusEmoji('stopwatch', showEmojis), 'Stopwatch') }),
         el('span', { class: 'card-value', style: { fontFamily: 'var(--font-mono)' }, text: formatDuration(swSec) }),
       ]),
       el('div', { style: { display: 'flex', gap: '6px' } }, [
@@ -80,7 +83,7 @@ export function renderWidgets(store, api) {
 
     el('div', { class: 'glass-card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('span', { class: 'card-label', text: 'Timers' }),
+        el('span', { class: 'card-label', text: withEmoji(statusEmoji('timer', showEmojis), 'Timers') }),
         el('div', { style: { display: 'flex', gap: '4px' } }, [1, 5, 15, 25].map((m) =>
           el('button', {
             class: 'pill-btn',
