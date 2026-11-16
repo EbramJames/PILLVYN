@@ -190,8 +190,10 @@ export function renderOverview(store, api) {
     ])
   );
 
-  // 4. Top Quick Actions Row
-  const actions = (store.config?.quick_actions || []).slice(0, 3);
+  // 4. Top Quick Actions Row (hidden when the Shortcuts / Actions module is disabled)
+  const actions = store.config?.modules?.actions === false
+    ? []
+    : (store.config?.quick_actions || []).slice(0, 3);
   if (actions.length > 0) {
     root.appendChild(
       el('div', { class: 'grid-3' }, actions.map((item) =>

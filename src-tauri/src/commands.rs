@@ -1,7 +1,8 @@
-use crate::config::{save_config, AppProfile, PillvynConfig, QuickActionItem};
+use crate::config::{save_config, AppProfile, AppearanceConfig, PillvynConfig, QuickActionItem};
 use crate::island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
 use crate::island::{
-    apply_window_geometry, list_monitors, HitboxRect, IslandWindowState, MonitorInfo,
+    apply_window_geometry, compute_island_window_position, enforce_tool_window, list_monitors,
+    HitboxRect, IslandWindowState, MonitorInfo,
 };
 use crate::services::actions::{execute_quick_action, open_external_url};
 use crate::services::ai::{run_ai_prompt, AiPromptResponse};
@@ -46,6 +47,8 @@ pub struct AppState {
     pub active_tab: Mutex<String>,
     pub active_profile: Mutex<Option<AppProfile>>,
     pub island_pinned: Mutex<bool>,
+    pub reposition_mode: Mutex<bool>,
+    pub preview_appearance: Mutex<Option<AppearanceConfig>>,
     pub last_expanded_ms: Mutex<u64>,
     pub last_local_audio_action_ms: Mutex<u64>,
     pub config_warnings: Mutex<Vec<String>>,
@@ -231,6 +234,10 @@ pub fn update_island_hitbox(
         }
     }
     if changed_expanded {
+        if let Some(island) = app.get_webview_window("island") {
+            let effective = effective_island_config(&state);
+            let _ = apply_window_geometry(&island, &effective);
+        }
         crate::emit_island_state(&app);
     }
 }
@@ -253,8 +260,38 @@ pub fn save_app_config(
     crate::validate_hotkeys_uniqueness(&new_config)?;
     save_config(&new_config)?;
 
+    let prev_widgets = state.config.lock().ok().map(|g| {
+        (
+            g.modules.widgets,
+            g.widgets.weather_enabled,
+            g.widgets.weather_city.clone(),
+        )
+    });
+
     if let Ok(mut guard) = state.config.lock() {
         *guard = new_config.clone();
+    }
+    if let Ok(mut prev) = state.preview_appearance.lock() {
+        *prev = None;
+    }
+    let was_reposition = state
+        .reposition_mode
+        .lock()
+        .map(|mut r| {
+            let prev = *r;
+            *r = false;
+            prev
+        })
+        .unwrap_or(false);
+    if was_reposition {
+        let _ = app.emit("pillvyn://reposition-mode", false);
+    }
+    if !new_config.modules.widgets {
+        if let Ok(mut act) = state.activities.lock() {
+            if act.remove("timer-primary") {
+                let _ = app.emit("pillvyn://activities", act.snapshot());
+            }
+        }
     }
     if let Ok(mut cb) = state.clipboard.lock() {
         cb.update_policy(
@@ -294,6 +331,27 @@ pub fn save_app_config(
     if let Ok(mut ws_warn) = state.config_warnings.lock() {
         *ws_warn = warnings.clone();
     }
+
+    let should_refresh_weather = new_config.modules.widgets
+        && new_config.widgets.weather_enabled
+        && prev_widgets.is_none_or(|(was_mod, was_weather, prev_city)| {
+            !was_mod || !was_weather || prev_city != new_config.widgets.weather_city
+        });
+    if should_refresh_weather {
+        let app_clone = app.clone();
+        let weather_cfg = new_config.widgets.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Ok(snap) = fetch_live_weather(&weather_cfg).await {
+                if let Some(st) = app_clone.try_state::<AppState>() {
+                    if let Ok(mut w) = st.widgets.lock() {
+                        w.weather = snap.clone();
+                    }
+                }
+                let _ = app_clone.emit("pillvyn://weather", snap);
+            }
+        });
+    }
+
     state.foreground_notify.notify_one();
     state.system_notify.notify_one();
     let _ = app.emit("pillvyn://config", new_config.clone());
@@ -328,16 +386,67 @@ pub fn validate_quick_action_cmd(kind: String, target: String) -> Result<String,
     crate::services::actions::validate_quick_action(&kind, &target)
 }
 
+pub(crate) fn effective_island_config(state: &AppState) -> PillvynConfig {
+    let mut cfg = state.config.lock().map(|c| c.clone()).unwrap_or_default();
+    if let Ok(prev) = state.preview_appearance.lock() {
+        if let Some(app_cfg) = prev.as_ref() {
+            cfg.appearance = app_cfg.clone();
+        }
+    }
+    cfg.sanitize();
+    cfg
+}
+
+pub(crate) fn restore_saved_appearance(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let had_preview = state
+        .preview_appearance
+        .lock()
+        .map(|mut prev| prev.take().is_some())
+        .unwrap_or(false);
+    let was_reposition = state
+        .reposition_mode
+        .lock()
+        .map(|mut rep| {
+            let prev = *rep;
+            *rep = false;
+            prev
+        })
+        .unwrap_or(false);
+    if was_reposition {
+        let _ = app.emit("pillvyn://reposition-mode", false);
+    }
+    let cfg = state.config.lock().map(|c| c.clone()).unwrap_or_default();
+    if had_preview || was_reposition {
+        if let Some(w) = app.get_webview_window("island") {
+            let _ = apply_window_geometry(&w, &cfg);
+        }
+        let _ = app.emit("pillvyn://appearance-preview", cfg.appearance.clone());
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IslandPositionUpdate {
+    pub top_offset: i32,
+    pub x_offset: i32,
+    pub monitor_name: Option<String>,
+    pub committed: bool,
+}
+
 #[tauri::command]
 pub fn preview_appearance(
     app: AppHandle,
-    appearance: crate::config::AppearanceConfig,
+    state: State<'_, AppState>,
+    appearance: AppearanceConfig,
 ) -> Result<(), String> {
-    let mut sanitized = PillvynConfig {
-        appearance,
-        ..Default::default()
-    };
+    let mut sanitized = state.config.lock().map(|c| c.clone()).unwrap_or_default();
+    sanitized.appearance = appearance;
     sanitized.sanitize();
+    if let Ok(mut prev) = state.preview_appearance.lock() {
+        *prev = Some(sanitized.appearance.clone());
+    }
     if let Some(w) = app.get_webview_window("island") {
         let _ = apply_window_geometry(&w, &sanitized);
     }
@@ -347,11 +456,113 @@ pub fn preview_appearance(
 
 #[tauri::command]
 pub fn cancel_appearance_preview(app: AppHandle, state: State<'_, AppState>) {
-    let cfg = state.config.lock().map(|c| c.clone()).unwrap_or_default();
-    if let Some(w) = app.get_webview_window("island") {
-        let _ = apply_window_geometry(&w, &cfg);
+    let _ = state;
+    restore_saved_appearance(&app);
+}
+
+#[tauri::command]
+pub fn set_reposition_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<bool, String> {
+    if let Ok(mut guard) = state.reposition_mode.lock() {
+        *guard = enabled;
     }
-    let _ = app.emit("pillvyn://appearance-preview", cfg.appearance);
+    if enabled {
+        if let Ok(mut exp) = state.island_expanded.lock() {
+            *exp = false;
+        }
+        if let Ok(mut pinned) = state.island_pinned.lock() {
+            *pinned = false;
+        }
+        if let Some(island) = app.get_webview_window("island") {
+            if let Ok(mut ws) = state.window_state.lock() {
+                ws.is_visible = true;
+            }
+            let effective_cfg = effective_island_config(&state);
+            let _ = apply_window_geometry(&island, &effective_cfg);
+            let _ = island.show();
+            enforce_tool_window(&island);
+        }
+        crate::emit_island_state(&app);
+    }
+    let _ = app.emit("pillvyn://reposition-mode", enabled);
+    Ok(enabled)
+}
+
+#[tauri::command]
+pub fn move_island_position(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    top_offset: i32,
+    x_offset: i32,
+    monitor_name: Option<String>,
+    commit: bool,
+) -> Result<IslandPositionUpdate, String> {
+    let monitors = list_monitors(&app);
+    let mut cfg = if commit {
+        state.config.lock().map(|g| g.clone()).unwrap_or_default()
+    } else {
+        effective_island_config(&state)
+    };
+
+    if let Some(m_name) = monitor_name {
+        let trimmed = m_name.trim().to_string();
+        cfg.appearance.monitor_name = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+    }
+
+    let target = cfg
+        .appearance
+        .monitor_name
+        .as_ref()
+        .and_then(|wanted| monitors.iter().find(|m| &m.name == wanted))
+        .or_else(|| monitors.iter().find(|m| m.is_primary))
+        .or_else(|| monitors.first());
+
+    let (clamped_x, clamped_top) = if let Some(m) = target {
+        let (_, clamped) = compute_island_window_position(m, top_offset, x_offset, false);
+        clamped
+    } else {
+        (x_offset.clamp(-3000, 3000), top_offset.clamp(0, 2400))
+    };
+
+    cfg.appearance.x_offset = clamped_x;
+    cfg.appearance.top_offset = clamped_top;
+    cfg.sanitize();
+
+    if commit {
+        save_config(&cfg)?;
+        if let Ok(mut guard) = state.config.lock() {
+            *guard = cfg.clone();
+        }
+        if let Ok(mut prev) = state.preview_appearance.lock() {
+            *prev = None;
+        }
+        let _ = app.emit("pillvyn://config", cfg.clone());
+    } else {
+        if let Ok(mut prev) = state.preview_appearance.lock() {
+            *prev = Some(cfg.appearance.clone());
+        }
+        let _ = app.emit("pillvyn://appearance-preview", cfg.appearance.clone());
+    }
+
+    if let Some(island) = app.get_webview_window("island") {
+        let _ = apply_window_geometry(&island, &cfg);
+    }
+
+    let payload = IslandPositionUpdate {
+        top_offset: cfg.appearance.top_offset,
+        x_offset: cfg.appearance.x_offset,
+        monitor_name: cfg.appearance.monitor_name.clone(),
+        committed: commit,
+    };
+    let _ = app.emit("pillvyn://position-updated", payload.clone());
+    Ok(payload)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -433,6 +644,16 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     let win = builder
         .build()
         .map_err(|e| format!("Failed to open Settings Studio: {e}"))?;
+
+    let handle_for_close = app.clone();
+    win.on_window_event(move |event| {
+        if matches!(
+            event,
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+        ) {
+            restore_saved_appearance(&handle_for_close);
+        }
+    });
 
     #[cfg(target_os = "windows")]
     apply_dark_titlebar(&win);

@@ -408,19 +408,27 @@ fn query_steam_running_app_id() -> Option<u32> {
 
 pub fn find_steam_library_folders() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    let candidates = [
+    let mut candidates = vec![
         PathBuf::from(r"C:\Program Files (x86)\Steam"),
         PathBuf::from(r"C:\Program Files\Steam"),
         PathBuf::from(r"D:\SteamLibrary"),
         PathBuf::from(r"H:\SteamLibrary"),
     ];
+
+    #[cfg(target_os = "windows")]
+    if let Some(reg_path) = query_steam_install_path() {
+        if !candidates.contains(&reg_path) {
+            candidates.insert(0, reg_path);
+        }
+    }
+
     for base in candidates {
         let steamapps = base.join("steamapps");
-        if steamapps.is_dir() {
+        if steamapps.is_dir() && !dirs.contains(&steamapps) {
             dirs.push(steamapps.clone());
         } else if base.is_dir() && base.file_name().is_some_and(|n| n == "SteamLibrary") {
             let sub = base.join("steamapps");
-            if sub.is_dir() {
+            if sub.is_dir() && !dirs.contains(&sub) {
                 dirs.push(sub);
             }
         }
@@ -441,6 +449,36 @@ pub fn find_steam_library_folders() -> Vec<PathBuf> {
         }
     }
     dirs
+}
+
+#[cfg(target_os = "windows")]
+fn query_steam_install_path() -> Option<PathBuf> {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+
+    let mut buf = [0u16; 512];
+    let mut size = (buf.len() * std::mem::size_of::<u16>()) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Valve\\Steam"),
+            w!("SteamPath"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    if status.is_ok() && size >= 2 {
+        let len = (size as usize / 2).saturating_sub(1);
+        let s = String::from_utf16_lossy(&buf[..len])
+            .trim_end_matches('\0')
+            .to_string();
+        if !s.is_empty() {
+            return Some(PathBuf::from(s));
+        }
+    }
+    None
 }
 
 fn lookup_steam_game_title(app_id: u32) -> Option<String> {

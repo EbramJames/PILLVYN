@@ -94,8 +94,47 @@ pub fn list_monitors(app: &AppHandle) -> Vec<MonitorInfo> {
         .collect()
 }
 
+/// Computes the target physical window `(x, y)` and clamped logical `(x_offset, top_offset)`
+/// for a given monitor so the capsule always remains visible inside screen bounds and lifts cleanly
+/// when expanded near the bottom edge.
+pub fn compute_island_window_position(
+    m: &MonitorInfo,
+    top_offset: i32,
+    x_offset: i32,
+    expanded: bool,
+) -> ((i32, i32), (i32, i32)) {
+    let scale = m.scale_factor.max(1.0);
+    let mon_w_logical = (m.width as f64) / scale;
+    let mon_h_logical = (m.height as f64) / scale;
+
+    let max_x = ((mon_w_logical / 2.0) - 120.0).max(0.0).round() as i32;
+    let max_top = (mon_h_logical - 68.0).max(0.0).round() as i32;
+
+    let clamped_x = x_offset.clamp(-max_x, max_x);
+    let clamped_top = top_offset.clamp(0, max_top);
+    let effective_top = if expanded {
+        let expanded_max_top = (mon_h_logical - 392.0).max(0.0).round() as i32;
+        clamped_top.min(expanded_max_top)
+    } else {
+        clamped_top
+    };
+
+    let phys_w = (ISLAND_CANVAS_WIDTH * scale).round() as i32;
+    let top_pad_phys = (ISLAND_CANVAS_TOP_PAD * scale).round() as i32;
+    let top_offset_phys = (effective_top as f64 * scale).round() as i32;
+    let x_offset_phys = (clamped_x as f64 * scale).round() as i32;
+
+    let pos_x = m.x + ((m.width as i32 - phys_w) / 2) + x_offset_phys;
+    let pos_y = m.y + top_offset_phys - top_pad_phys;
+    ((pos_x, pos_y), (clamped_x, clamped_top))
+}
+
 pub fn apply_window_geometry(window: &WebviewWindow, cfg: &PillvynConfig) -> Result<(), String> {
     let app = window.app_handle();
+    let expanded = app
+        .try_state::<AppState>()
+        .and_then(|st| st.island_expanded.lock().ok().map(|g| *g))
+        .unwrap_or(false);
     let monitors = list_monitors(app);
     let target = cfg
         .appearance
@@ -108,14 +147,12 @@ pub fn apply_window_geometry(window: &WebviewWindow, cfg: &PillvynConfig) -> Res
     let _ = window.set_size(LogicalSize::new(ISLAND_CANVAS_WIDTH, ISLAND_CANVAS_HEIGHT));
 
     if let Some(m) = target {
-        let scale = m.scale_factor.max(1.0);
-        let phys_w = (ISLAND_CANVAS_WIDTH * scale).round() as i32;
-        let top_pad_phys = (ISLAND_CANVAS_TOP_PAD * scale).round() as i32;
-        let top_offset_phys = (cfg.appearance.top_offset as f64 * scale).round() as i32;
-        let x_offset_phys = (cfg.appearance.x_offset as f64 * scale).round() as i32;
-
-        let pos_x = m.x + ((m.width as i32 - phys_w) / 2) + x_offset_phys;
-        let pos_y = m.y + top_offset_phys - top_pad_phys;
+        let ((pos_x, pos_y), _) = compute_island_window_position(
+            m,
+            cfg.appearance.top_offset,
+            cfg.appearance.x_offset,
+            expanded,
+        );
         window
             .set_position(PhysicalPosition::new(pos_x, pos_y))
             .map_err(|e| format!("Failed to position island window: {e}"))?;

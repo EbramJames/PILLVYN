@@ -5,12 +5,13 @@ pub mod services;
 
 use commands::{
     ask_ai_assistant, cancel_appearance_preview, check_updates, clipboard_action,
-    get_initial_state, get_monitors, get_tray_state, media_control, notification_action,
-    open_settings_window, open_url, plugin_action, preview_appearance, push_notification,
-    refresh_weather, resize_tray_window, run_quick_action, save_app_config, save_settings_config,
-    set_click_through_override, set_display_brightness, set_island_pinned, set_mute, set_volume,
-    switch_audio_device, sync_timer_activity, timer_action, tray_action, update_island_hitbox,
-    validate_quick_action_cmd, AppState, TrayStateSnapshot,
+    get_initial_state, get_monitors, get_tray_state, media_control, move_island_position,
+    notification_action, open_settings_window, open_url, plugin_action, preview_appearance,
+    push_notification, refresh_weather, resize_tray_window, run_quick_action, save_app_config,
+    save_settings_config, set_click_through_override, set_display_brightness, set_island_pinned,
+    set_mute, set_reposition_mode, set_volume, switch_audio_device, sync_timer_activity,
+    timer_action, tray_action, update_island_hitbox, validate_quick_action_cmd, AppState,
+    TrayStateSnapshot,
 };
 use config::{load_config, save_config, AppProfile, PillvynConfig};
 use island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
@@ -173,6 +174,12 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                         next_expanded = if was_hidden { true } else { !*exp };
                         *exp = next_expanded;
                     }
+                    if let Ok(mut rep) = state.reposition_mode.lock() {
+                        if *rep {
+                            *rep = false;
+                            let _ = app.emit("pillvyn://reposition-mode", false);
+                        }
+                    }
                     if next_expanded {
                         if let Ok(mut ts) = state.last_expanded_ms.lock() {
                             *ts = now_ms();
@@ -180,10 +187,8 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                     } else if let Ok(mut pinned) = state.island_pinned.lock() {
                         *pinned = false;
                     }
-                    if was_hidden {
-                        if let Ok(cfg) = state.config.lock() {
-                            let _ = apply_window_geometry(&w, &cfg);
-                        }
+                    if let Ok(cfg) = state.config.lock() {
+                        let _ = apply_window_geometry(&w, &cfg);
                     }
                 }
                 if !w.is_visible().unwrap_or(false) {
@@ -231,6 +236,12 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
 
 pub(crate) fn toggle_island_visibility(app: &AppHandle) {
     let state = app.state::<AppState>();
+    if let Ok(mut rep) = state.reposition_mode.lock() {
+        if *rep {
+            *rep = false;
+            let _ = app.emit("pillvyn://reposition-mode", false);
+        }
+    }
     if let Some(win) = app.get_webview_window("island") {
         let visible = win.is_visible().unwrap_or(true);
         if visible {
@@ -239,9 +250,8 @@ pub(crate) fn toggle_island_visibility(app: &AppHandle) {
                 ws.is_visible = false;
             }
         } else {
-            if let Ok(cfg) = state.config.lock() {
-                let _ = apply_window_geometry(&win, &cfg);
-            }
+            let cfg = crate::commands::effective_island_config(&state);
+            let _ = apply_window_geometry(&win, &cfg);
             let _ = win.show();
             if let Ok(mut ws) = state.window_state.lock() {
                 ws.is_visible = true;
@@ -382,6 +392,8 @@ pub fn run() {
         active_tab: Mutex::new("overview".to_string()),
         active_profile: Mutex::new(None),
         island_pinned: Mutex::new(false),
+        reposition_mode: Mutex::new(false),
+        preview_appearance: Mutex::new(None),
         last_expanded_ms: Mutex::new(0),
         last_local_audio_action_ms: Mutex::new(0),
         config_warnings: Mutex::new(Vec::new()),
@@ -392,8 +404,18 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(app_state)
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            handle_hotkey_action(app, "toggle_expand");
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv
+                .iter()
+                .any(|a| a == "--settings" || a == "--open-settings")
+            {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::commands::open_settings_window(app_handle).await;
+                });
+            } else {
+                handle_hotkey_action(app, "toggle_expand");
+            }
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -438,7 +460,14 @@ pub fn run() {
 
             spawn_click_through_controller(handle.clone(), state.window_state.clone());
             spawn_clipboard_listener(handle.clone(), state.clipboard.clone());
-            spawn_background_services(handle);
+            spawn_background_services(handle.clone());
+
+            if std::env::args().any(|a| a == "--settings" || a == "--open-settings") {
+                let app_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::commands::open_settings_window(app_handle).await;
+                });
+            }
 
             info!("PILLVYN initialized cleanly");
             Ok(())
@@ -453,6 +482,8 @@ pub fn run() {
             validate_quick_action_cmd,
             preview_appearance,
             cancel_appearance_preview,
+            set_reposition_mode,
+            move_island_position,
             get_tray_state,
             resize_tray_window,
             tray_action,
@@ -1301,6 +1332,7 @@ fn format_dl_subtitle(bps: f64, pct: Option<f64>) -> String {
 mod tests {
     use super::{compute_tray_popup_position, normalize_hotkey_combo, validate_hotkeys_uniqueness};
     use crate::config::PillvynConfig;
+    use crate::island::{compute_island_window_position, MonitorInfo};
     use crate::services::actions::validate_quick_action;
 
     #[test]
@@ -1351,5 +1383,49 @@ mod tests {
         );
         assert!(validate_quick_action("uri", "javascript:alert(1)").is_err());
         assert!(validate_quick_action("app", "cmd & whoami").is_err());
+    }
+
+    #[test]
+    fn computes_clamped_island_positions_across_dpi_and_edges() {
+        let mon_1080 = MonitorInfo {
+            name: "Primary".into(),
+            width: 1920,
+            height: 1080,
+            x: 0,
+            y: 0,
+            scale_factor: 1.0,
+            is_primary: true,
+        };
+
+        // Centered near top: x = (1920 - 560) / 2 = 680, y = 10 - 14 = -4
+        let ((px, py), (cx, ctop)) = compute_island_window_position(&mon_1080, 10, 0, false);
+        assert_eq!((cx, ctop), (0, 10));
+        assert_eq!((px, py), (680, -4));
+
+        // Extreme off-screen values clamp inside monitor bounds: max_x = 1920/2 - 120 = 840, max_top = 1080 - 68 = 1012
+        let ((px2, py2), (cx2, ctop2)) =
+            compute_island_window_position(&mon_1080, 5000, -5000, false);
+        assert_eq!((cx2, ctop2), (-840, 1012));
+        assert_eq!((px2, py2), (680 - 840, 1012 - 14));
+
+        // Expanded capsule near bottom edge lifts cleanly above monitor bottom (1080 - 392 = 688)
+        let ((_px3, py3), (_cx3, ctop3)) = compute_island_window_position(&mon_1080, 1012, 0, true);
+        assert_eq!(ctop3, 1012);
+        assert_eq!(py3, 688 - 14);
+
+        // High-DPI monitor (2400x1350 @ 1.25x => 1920x1080 logical) offsets from monitor origin (x = 1920, y = 40)
+        let mon_hidpi = MonitorInfo {
+            name: "Secondary".into(),
+            width: 2400,
+            height: 1350,
+            x: 1920,
+            y: 40,
+            scale_factor: 1.25,
+            is_primary: false,
+        };
+        let ((px4, py4), (cx4, ctop4)) = compute_island_window_position(&mon_hidpi, 20, 100, false);
+        assert_eq!((cx4, ctop4), (100, 20));
+        // phys_w = 560 * 1.25 = 700, pos_x = 1920 + (2400 - 700)/2 + 125 = 2895; pos_y = 40 + 25 - 18 = 47
+        assert_eq!((px4, py4), (2895, 47));
     }
 }

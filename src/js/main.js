@@ -49,6 +49,17 @@ let panelNoticeTimer = null;
 let deferredPanelRender = false;
 let rangeDragReleaseTimer = null;
 let localSystemLockUntil = 0;
+let repositionMode = false;
+let desktopMove = null;
+
+const sendDesktopPosition = createThrottledSender(20, ({ topOffset, xOffset, monitorName }) => {
+  invoke?.('move_island_position', {
+    topOffset,
+    xOffset,
+    monitorName,
+    commit: false,
+  }).catch(() => {});
+});
 
 function createThrottledSender(delayMs, fn) {
   let timer = null;
@@ -464,31 +475,57 @@ function renderHeaderButtons() {
   const focus = Boolean(store.config?.privacy?.focus_mode);
 
   if (pinBtn) {
-    clear(pinBtn);
-    pinBtn.appendChild(icon('pin', 12));
-    pinBtn.className = `icon-btn ghost ${store.pinned ? 'active' : ''}`;
-    pinBtn.title = store.pinned ? 'Pinned Open (Click to Unpin)' : 'Pin Open (Ignore Click Outside)';
+    const nextPin = String(Boolean(store.pinned));
+    if (pinBtn.dataset.renderedKey !== nextPin) {
+      pinBtn.dataset.renderedKey = nextPin;
+      clear(pinBtn);
+      pinBtn.appendChild(icon('pin', 12));
+      pinBtn.className = `icon-btn ghost ${store.pinned ? 'active' : ''}`;
+      pinBtn.title = store.pinned ? 'Pinned Open (Click to Unpin)' : 'Pin Open (Ignore Click Outside)';
+      pinBtn.setAttribute('aria-label', pinBtn.title);
+    }
   }
 
-  clear(dndBtn);
-  dndBtn.appendChild(icon(dnd ? 'bellOff' : 'bell', 13));
-  dndBtn.className = `icon-btn ghost ${dnd ? 'danger-active' : ''}`;
+  if (dndBtn) {
+    const nextDnd = String(dnd);
+    if (dndBtn.dataset.renderedKey !== nextDnd) {
+      dndBtn.dataset.renderedKey = nextDnd;
+      clear(dndBtn);
+      dndBtn.appendChild(icon(dnd ? 'bellOff' : 'bell', 13));
+      dndBtn.className = `icon-btn ghost ${dnd ? 'danger-active' : ''}`;
+    }
+  }
 
-  clear(focusBtn);
-  focusBtn.appendChild(icon('moon', 13));
-  focusBtn.className = `icon-btn ghost ${focus ? 'active' : ''}`;
+  if (focusBtn) {
+    const nextFocus = String(focus);
+    if (focusBtn.dataset.renderedKey !== nextFocus) {
+      focusBtn.dataset.renderedKey = nextFocus;
+      clear(focusBtn);
+      focusBtn.appendChild(icon('moon', 13));
+      focusBtn.className = `icon-btn ghost ${focus ? 'active' : ''}`;
+    }
+  }
 
-  clear(minBtn);
-  minBtn.appendChild(icon('minimize', 13));
-  minBtn.className = 'icon-btn ghost';
+  if (minBtn && !minBtn.dataset.renderedKey) {
+    minBtn.dataset.renderedKey = '1';
+    clear(minBtn);
+    minBtn.appendChild(icon('minimize', 13));
+    minBtn.className = 'icon-btn ghost';
+  }
 
-  clear(colBtn);
-  colBtn.appendChild(icon('chevronUp', 13));
-  colBtn.className = 'icon-btn ghost';
+  if (colBtn && !colBtn.dataset.renderedKey) {
+    colBtn.dataset.renderedKey = '1';
+    clear(colBtn);
+    colBtn.appendChild(icon('chevronUp', 13));
+    colBtn.className = 'icon-btn ghost';
+  }
 
-  clear(setBtn);
-  setBtn.appendChild(icon('settings', 13));
-  setBtn.className = 'icon-btn ghost';
+  if (setBtn && !setBtn.dataset.renderedKey) {
+    setBtn.dataset.renderedKey = '1';
+    clear(setBtn);
+    setBtn.appendChild(icon('settings', 13));
+    setBtn.className = 'icon-btn ghost';
+  }
 }
 
 function handleActivityClick(act) {
@@ -545,13 +582,14 @@ viewMinimized.addEventListener('click', () => {
 });
 
 viewCompact.addEventListener('click', (e) => {
-  if (performance.now() < suppressNextClickUntil) return;
+  if (repositionMode || performance.now() < suppressNextClickUntil) return;
   if (e.target.closest('button')) return;
   setIslandState('expanded');
 });
 
 viewCompact.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+  if (repositionMode) return;
   setIslandState('minimized');
 });
 
@@ -602,6 +640,21 @@ let dragGesture = null;
 
 shell.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || store.rangeDragging) return;
+  if (repositionMode) {
+    e.preventDefault();
+    e.stopPropagation();
+    desktopMove = {
+      pointerId: e.pointerId,
+      downScreenX: e.screenX,
+      downScreenY: e.screenY,
+      startX: Number(store.config?.appearance?.x_offset || 0),
+      startTop: Number(store.config?.appearance?.top_offset || 10),
+      moved: false,
+    };
+    shell.classList.add('gesture-dragging');
+    shell.setPointerCapture?.(e.pointerId);
+    return;
+  }
   if (e.target.closest('input, textarea, select, button, a, label, .range-slider, .peek-btn, .session-chip, .action-tile')) return;
   dragGesture = {
     x: e.clientX,
@@ -611,11 +664,58 @@ shell.addEventListener('pointerdown', (e) => {
   };
 });
 
+shell.addEventListener('pointermove', (e) => {
+  if (!repositionMode || !desktopMove || e.pointerId !== desktopMove.pointerId) return;
+  const dx = Math.round(e.screenX - desktopMove.downScreenX);
+  const dy = Math.round(e.screenY - desktopMove.downScreenY);
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+    desktopMove.moved = true;
+  }
+  let nextX = desktopMove.startX + dx;
+  if (Math.abs(nextX) <= 14) nextX = 0;
+  const nextTop = Math.max(0, desktopMove.startTop + dy);
+  if (store.config?.appearance) {
+    store.config.appearance.x_offset = nextX;
+    store.config.appearance.top_offset = nextTop;
+  }
+  sendDesktopPosition.send({
+    topOffset: nextTop,
+    xOffset: nextX,
+    monitorName: store.config?.appearance?.monitor_name || null,
+  });
+});
+
 window.addEventListener('pointerup', () => api.setRangeDragging(false));
 window.addEventListener('pointercancel', () => api.setRangeDragging(false));
 window.addEventListener('blur', () => api.setRangeDragging(false));
 
 shell.addEventListener('pointerup', (e) => {
+  if (desktopMove && e.pointerId === desktopMove.pointerId) {
+    const activeMove = desktopMove;
+    desktopMove = null;
+    shell.classList.remove('gesture-dragging');
+    if (shell.hasPointerCapture?.(e.pointerId)) {
+      shell.releasePointerCapture(e.pointerId);
+    }
+    const dx = Math.round(e.screenX - activeMove.downScreenX);
+    const dy = Math.round(e.screenY - activeMove.downScreenY);
+    let nextX = activeMove.startX + dx;
+    if (Math.abs(nextX) <= 14) nextX = 0;
+    const nextTop = Math.max(0, activeMove.startTop + dy);
+    if (activeMove.moved) {
+      suppressNextClickUntil = performance.now() + 260;
+      if (store.config?.appearance) {
+        store.config.appearance.x_offset = nextX;
+        store.config.appearance.top_offset = nextTop;
+      }
+      sendDesktopPosition.flush({
+        topOffset: nextTop,
+        xOffset: nextX,
+        monitorName: store.config?.appearance?.monitor_name || null,
+      });
+    }
+    return;
+  }
   if (!dragGesture) return;
   const { x, y, ts, startedInHeaderOrNav } = dragGesture;
   dragGesture = null;
@@ -697,6 +797,7 @@ shell.addEventListener('mouseleave', () => {
 
 window.addEventListener('blur', () => {
   if (
+    !repositionMode &&
     store.islandState === 'expanded' &&
     !store.pinned &&
     store.config?.appearance?.click_outside_dismiss !== false &&
@@ -707,6 +808,11 @@ window.addEventListener('blur', () => {
 });
 
 window.addEventListener('keydown', (e) => {
+  if (repositionMode && e.key === 'Escape') {
+    e.preventDefault();
+    invoke?.('set_reposition_mode', { enabled: false }).catch(() => {});
+    return;
+  }
   if (store.islandState !== 'expanded') return;
 
   if (e.key === 'Escape') {
@@ -823,6 +929,28 @@ async function bootstrap() {
     });
     await listen('pillvyn://pinned', (e) => {
       patchStore({ pinned: Boolean(e.payload) }, 'pin');
+    });
+    await listen('pillvyn://reposition-mode', (e) => {
+      repositionMode = Boolean(e.payload);
+      shell.classList.toggle('reposition-mode', repositionMode);
+      if (repositionMode && store.islandState !== 'compact') {
+        setIslandState('compact');
+      }
+      if (!repositionMode) {
+        desktopMove = null;
+        suppressNextClickUntil = 0;
+        shell.classList.remove('gesture-dragging');
+      }
+      renderCompactAndMinimized(store, api);
+      requestAnimationFrame(reportHitbox);
+    });
+    await listen('pillvyn://position-updated', (e) => {
+      if (!e.payload || !store.config?.appearance) return;
+      store.config.appearance.top_offset = Number(e.payload.top_offset ?? store.config.appearance.top_offset);
+      store.config.appearance.x_offset = Number(e.payload.x_offset ?? store.config.appearance.x_offset);
+      if (e.payload.monitor_name !== undefined) {
+        store.config.appearance.monitor_name = e.payload.monitor_name;
+      }
     });
     await listen('pillvyn://dismiss-expanded', () => {
       if (store.islandState === 'expanded' && !store.pinned) {

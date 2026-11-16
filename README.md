@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.3.0" src="https://img.shields.io/badge/Version-v1.3.0-f4f7ff?labelColor=090a0e" /></a>
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.4.0" src="https://img.shields.io/badge/Version-v1.4.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -40,7 +40,11 @@
 | :---: |
 | <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
 
-## Features & v1.3.0 Highlights
+## Features & v1.4.0 Highlights
+
+- **Full Dynamic Island Repositioning & Reliable Settings Close**:
+  - Added an **Interactive Screen Positioner** map, one-click corner/edge snap presets (**Top Left**, **Top Center**, **Top Right**, **Center**, **Bottom Center**), full-monitor X/Y sliders, and live **Move on Desktop** dragging in **Settings Studio → Display & Behavior** with automatic bottom-edge expansion lift across DPI scales.
+  - Fixed the Settings Studio window close bug by eliminating blocking JS `onCloseRequested` interception and moving preview/reposition cleanup into a native non-blocking Tauri window event hook.
 
 - **Zero-Spawn Windows Integration & Taskbar Cleanliness**:
   - Replaced background `netsh.exe` and `powershell.exe` child-process polling with pure in-process Windows `GetIfTable2` IEEE 802.11 link detection and native COM `IWbemLocator` + DDC/CI brightness — eliminating the Windows 11 taskbar Location Services (`Network Command Shell`) indicator flicker and background cursor flashes.
@@ -73,9 +77,9 @@
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.3.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.4.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
 2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_1.3.0_x64-setup.exe.sha256`.
+3. Verify integrity (optional): compare against `PILLVYN_1.4.0_x64-setup.exe.sha256`.
 4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**

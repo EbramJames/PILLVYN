@@ -40,6 +40,18 @@
   transition: none !important;
 }
 
+.island-shell.reposition-mode {
+  cursor: grab;
+  border-color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 36%, transparent),
+    var(--shadow-island);
+}
+
+.island-shell.reposition-mode.gesture-dragging {
+  cursor: grabbing;
+}
+
 .island-shell::before {
   content: "";
   position: absolute;

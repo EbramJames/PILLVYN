@@ -2,6 +2,9 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static CONFIG_IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -352,8 +355,8 @@ impl PillvynConfig {
         self.appearance.opacity = self.appearance.opacity.clamp(0.45, 0.98);
         self.appearance.scale = self.appearance.scale.clamp(0.8, 1.35);
         self.appearance.compact_width = self.appearance.compact_width.clamp(210, 380);
-        self.appearance.top_offset = self.appearance.top_offset.clamp(0, 120);
-        self.appearance.x_offset = self.appearance.x_offset.clamp(-1200, 1200);
+        self.appearance.top_offset = self.appearance.top_offset.clamp(0, 2400);
+        self.appearance.x_offset = self.appearance.x_offset.clamp(-3000, 3000);
         if self.appearance.auto_collapse_ms > 0 {
             self.appearance.auto_collapse_ms = self.appearance.auto_collapse_ms.clamp(2000, 30000);
         }
@@ -439,12 +442,15 @@ pub fn load_config() -> PillvynConfig {
 }
 
 pub fn save_config(cfg: &PillvynConfig) -> Result<(), String> {
+    let _guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "Config save lock poisoned".to_string())?;
     let mut clean = cfg.clone();
     clean.sanitize();
     let dir = app_data_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let path = config_file_path();
-    let tmp = dir.join("config.json.tmp");
+    let tmp = dir.join(format!("config.{}.tmp", std::process::id()));
     let json = serde_json::to_string_pretty(&clean)
         .map_err(|e| format!("Failed to serialize config: {e}"))?;
     fs::write(&tmp, json).map_err(|e| format!("Failed to write temp config: {e}"))?;

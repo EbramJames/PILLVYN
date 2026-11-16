@@ -8,7 +8,6 @@ import {
 
 const { invoke } = window.__TAURI__?.core || {};
 const { listen } = window.__TAURI__?.event || {};
-const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
 
 const SECTIONS = [
   {
@@ -78,7 +77,7 @@ let savedConfig = null;
 let config = null;
 let monitors = [];
 let plugins = null;
-let appVersion = '1.3.0';
+let appVersion = '1.4.0';
 let islandVisible = true;
 let islandExpanded = false;
 let activeSection = 'appearance';
@@ -88,16 +87,20 @@ let resetConfirmTimer = null;
 let updateResult = null;
 let recordingHotkeyKey = null;
 let previewDebounceTimer = null;
+let repositionModeActive = false;
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === null) continue;
+    if (v === undefined || v === null || v === false) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
     else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
-    else node.setAttribute(k, String(v));
+    else if (k === 'disabled') node.disabled = Boolean(v);
+    else if (k === 'checked') node.checked = Boolean(v);
+    else if (k === 'value') node.value = String(v);
+    else node.setAttribute(k, v === true ? '' : String(v));
   }
   for (const child of Array.isArray(children) ? children : [children]) {
     if (child == null) continue;
@@ -495,16 +498,95 @@ function renderAppearanceSection(container) {
   updateLivePreviewBox();
 }
 
+function getMonitorLogicalBounds(monitorName) {
+  const fallback = monitors.find((m) => m.is_primary) || monitors[0];
+  const m = (monitorName && monitors.find((item) => item.name === monitorName)) || fallback;
+  const scale = Math.max(1, Number(m?.scale_factor || 1));
+  const monW = Math.max(800, Math.round(Number(m?.width || 1920) / scale));
+  const monH = Math.max(540, Math.round(Number(m?.height || 1080) / scale));
+  const maxTop = Math.max(120, monH - 68);
+  const maxX = Math.max(240, Math.round(monW / 2 - 120));
+  return { monW, monH, maxTop, maxX, scale, name: m?.name || 'Primary Display' };
+}
+
+function formatPositionReadout(topOffset, xOffset) {
+  const sx = xOffset > 0 ? `+${Math.round(xOffset)}` : `${Math.round(xOffset)}`;
+  return `X ${sx}px · Y ${Math.round(topOffset)}px`;
+}
+
+function syncRepositionModeButton() {
+  const btn = document.getElementById('btn-reposition-desktop');
+  if (!btn) return;
+  btn.textContent = repositionModeActive ? 'Done Moving' : 'Move on Desktop';
+  btn.classList.toggle('is-active', repositionModeActive);
+}
+
+function syncBehaviorPositionWidgets() {
+  if (!config?.appearance) return;
+  const ap = config.appearance;
+  const bounds = getMonitorLogicalBounds(ap.monitor_name);
+  const topVal = Math.max(0, Math.min(bounds.maxTop, Math.round(Number(ap.top_offset ?? 10))));
+  const xVal = Math.max(-bounds.maxX, Math.min(bounds.maxX, Math.round(Number(ap.x_offset ?? 0))));
+  ap.top_offset = topVal;
+  ap.x_offset = xVal;
+
+  const topSlider = document.getElementById('slider-top-offset');
+  const topReadout = document.getElementById('slider-top-offset-value');
+  if (topSlider) {
+    topSlider.value = String(topVal);
+    updateRangeTrackFill(topSlider);
+    const resetLink = topSlider.closest('.slider-row')?.querySelector('.slider-reset-link');
+    if (resetLink) resetLink.classList.toggle('is-hidden', Math.abs(topVal - 10) < 0.5);
+  }
+  if (topReadout) topReadout.textContent = `${topVal}px`;
+
+  const xSlider = document.getElementById('slider-x-offset');
+  const xReadout = document.getElementById('slider-x-offset-value');
+  if (xSlider) {
+    xSlider.value = String(xVal);
+    updateRangeTrackFill(xSlider);
+    const resetLink = xSlider.closest('.slider-row')?.querySelector('.slider-reset-link');
+    if (resetLink) resetLink.classList.toggle('is-hidden', Math.abs(xVal) < 2.5);
+  }
+  if (xReadout) xReadout.textContent = `${xVal > 0 ? '+' : ''}${xVal}px`;
+
+  const padReadout = document.getElementById('position-pad-readout');
+  if (padReadout) padReadout.textContent = formatPositionReadout(topVal, xVal);
+
+  const pill = document.getElementById('position-pad-pill');
+  if (pill) {
+    const xNorm = (xVal + bounds.maxX) / Math.max(1, bounds.maxX * 2);
+    const yNorm = topVal / Math.max(1, bounds.maxTop);
+    pill.style.left = `${(12 + xNorm * 76).toFixed(2)}%`;
+    pill.style.top = `${(6 + yNorm * 82).toFixed(2)}%`;
+  }
+
+  document.querySelectorAll('.btn-preset[data-preset]').forEach((btn) => {
+    const px = Number(btn.dataset.x);
+    const py = Number(btn.dataset.y);
+    btn.classList.toggle('is-active', Math.abs(px - xVal) <= 6 && Math.abs(py - topVal) <= 6);
+  });
+
+  syncRepositionModeButton();
+}
+
 function renderBehaviorSection(container) {
   const ap = config.appearance;
+  const bounds = getMonitorLogicalBounds(ap.monitor_name);
+  ap.top_offset = Math.max(0, Math.min(bounds.maxTop, Math.round(Number(ap.top_offset ?? 10))));
+  ap.x_offset = Math.max(-bounds.maxX, Math.min(bounds.maxX, Math.round(Number(ap.x_offset ?? 0))));
 
   const monitorSelect = el('select', {
     class: 'select-field',
     id: 'select-monitor',
     onChange: (e) => {
       ap.monitor_name = e.target.value || null;
+      const nextBounds = getMonitorLogicalBounds(ap.monitor_name);
+      ap.top_offset = Math.max(0, Math.min(nextBounds.maxTop, Math.round(Number(ap.top_offset ?? 10))));
+      ap.x_offset = Math.max(-nextBounds.maxX, Math.min(nextBounds.maxX, Math.round(Number(ap.x_offset ?? 0))));
       setDirtyState(true);
       scheduleLiveAppearancePreview();
+      renderSection();
     },
   }, [
     el('option', { value: '', text: 'Auto (Primary Display)' }),
@@ -533,11 +615,86 @@ function renderBehaviorSection(container) {
   ]);
   autoCollapseSelect.value = String(ap.auto_collapse_ms || 0);
 
+  const applyNewPosition = (nextTop, nextX) => {
+    ap.top_offset = Math.max(0, Math.min(bounds.maxTop, Math.round(nextTop)));
+    ap.x_offset = Math.max(-bounds.maxX, Math.min(bounds.maxX, Math.round(nextX)));
+    setDirtyState(true);
+    syncBehaviorPositionWidgets();
+    scheduleLiveAppearancePreview();
+  };
+
+  const padPill = el('div', { class: 'position-pad-pill', id: 'position-pad-pill' });
+  const padStage = el(
+    'div',
+    {
+      class: 'position-pad-stage',
+      id: 'position-pad-stage',
+      title: 'Click or drag to reposition Dynamic Island on your monitor',
+      style: { aspectRatio: `${bounds.monW} / ${bounds.monH}` },
+    },
+    [padPill]
+  );
+
+  let padDragging = false;
+  const updateFromPointerEvent = (e) => {
+    const rect = padStage.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const relX = (e.clientX - rect.left) / rect.width;
+    const relY = (e.clientY - rect.top) / rect.height;
+    const xNorm = Math.max(0, Math.min(1, (relX - 0.12) / 0.76));
+    const yNorm = Math.max(0, Math.min(1, (relY - 0.06) / 0.82));
+    let nextX = Math.round((xNorm * 2 - 1) * bounds.maxX);
+    if (Math.abs(nextX) <= 16) nextX = 0;
+    const nextTop = Math.round(yNorm * bounds.maxTop);
+    applyNewPosition(nextTop, nextX);
+  };
+
+  padStage.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    padDragging = true;
+    padStage.classList.add('is-dragging');
+    padStage.setPointerCapture?.(e.pointerId);
+    updateFromPointerEvent(e);
+  });
+  padStage.addEventListener('pointermove', (e) => {
+    if (!padDragging) return;
+    updateFromPointerEvent(e);
+  });
+  const endPadDrag = (e) => {
+    if (!padDragging) return;
+    padDragging = false;
+    padStage.classList.remove('is-dragging');
+    if (e?.pointerId != null && padStage.hasPointerCapture?.(e.pointerId)) {
+      padStage.releasePointerCapture(e.pointerId);
+    }
+  };
+  padStage.addEventListener('pointerup', endPadDrag);
+  padStage.addEventListener('pointercancel', endPadDrag);
+
+  const presets = [
+    { id: 'top-left', label: 'Top Left', x: -bounds.maxX, y: 10 },
+    { id: 'top-center', label: 'Top Center', x: 0, y: 10 },
+    { id: 'top-right', label: 'Top Right', x: bounds.maxX, y: 10 },
+    { id: 'center', label: 'Center', x: 0, y: Math.round((bounds.monH - 44) / 2) },
+    { id: 'bottom-center', label: 'Bottom Center', x: 0, y: Math.max(0, bounds.maxTop - 48) },
+  ];
+
+  const desktopMoveBtn = el('button', {
+    type: 'button',
+    class: `btn-preset is-desktop-move ${repositionModeActive ? 'is-active' : ''}`,
+    id: 'btn-reposition-desktop',
+    text: repositionModeActive ? 'Done Moving' : 'Move on Desktop',
+    onClick: () => {
+      if (!invoke) return;
+      invoke('set_reposition_mode', { enabled: !repositionModeActive }).catch(() => {});
+    },
+  });
+
   container.appendChild(
     el('div', { class: 'setting-card' }, [
       el('div', { class: 'card-heading' }, [
         el('h2', { text: 'Screen Position' }),
-        el('span', { text: 'Live moves on active display' }),
+        el('span', { text: `${bounds.monW}×${bounds.monH} logical workspace` }),
       ]),
       el('div', { class: 'setting-row' }, [
         el('div', { class: 'row-info' }, [
@@ -546,18 +703,48 @@ function renderBehaviorSection(container) {
         ]),
         monitorSelect,
       ]),
+      el('div', { class: 'position-pad-wrap' }, [
+        el('div', { class: 'position-pad-top' }, [
+          el('span', { class: 'position-pad-title', text: 'Interactive Screen Positioner' }),
+          el('span', {
+            class: 'position-pad-readout',
+            id: 'position-pad-readout',
+            text: formatPositionReadout(ap.top_offset, ap.x_offset),
+          }),
+        ]),
+        padStage,
+        el('div', { class: 'position-presets' }, [
+          ...presets.map((p) =>
+            el('button', {
+              type: 'button',
+              class: 'btn-preset',
+              'data-preset': p.id,
+              'data-x': String(p.x),
+              'data-y': String(p.y),
+              text: p.label,
+              onClick: () => applyNewPosition(p.y, p.x),
+            })
+          ),
+          desktopMoveBtn,
+        ]),
+        el('div', {
+          class: 'row-desc',
+          text: 'Drag on the map above, pick a preset, or click Move on Desktop to drag the live capsule directly across your screen.',
+        }),
+      ]),
       sliderField({
         id: 'slider-top-offset',
-        title: 'Top Edge Distance',
-        desc: 'Space between the top screen edge and the top of the capsule.',
+        title: 'Vertical Position (From Top)',
+        desc: 'Move the capsule anywhere from the top edge down to the bottom of your monitor.',
         value: Number(ap.top_offset ?? 10),
         min: 0,
-        max: 120,
+        max: bounds.maxTop,
         step: 1,
         defaultValue: 10,
         format: (v) => `${Math.round(v)}px`,
         onChange: (v) => {
           ap.top_offset = Math.round(v);
+          syncBehaviorPositionWidgets();
         },
         livePreview: true,
       }),
@@ -566,13 +753,14 @@ function renderBehaviorSection(container) {
         title: 'Horizontal Position',
         desc: 'Shift left or right from screen center (0px = perfectly centered).',
         value: Number(ap.x_offset ?? 0),
-        min: -600,
-        max: 600,
-        step: 10,
+        min: -bounds.maxX,
+        max: bounds.maxX,
+        step: 5,
         defaultValue: 0,
         format: (v) => `${v > 0 ? '+' : ''}${Math.round(v)}px`,
         onChange: (v) => {
           ap.x_offset = Math.round(v);
+          syncBehaviorPositionWidgets();
         },
         livePreview: true,
       }),
@@ -633,6 +821,8 @@ function renderBehaviorSection(container) {
       ),
     ])
   );
+
+  syncBehaviorPositionWidgets();
 }
 
 function renderModulesSection(container) {
@@ -1308,7 +1498,7 @@ async function init() {
     config = structuredClone(initPayload.config);
     monitors = initPayload.monitors || [];
     plugins = initPayload.plugins || null;
-    appVersion = initPayload.app_version || '1.3.0';
+    appVersion = initPayload.app_version || '1.4.0';
     islandVisible = initPayload.island_visible !== false;
     islandExpanded = Boolean(initPayload.island_expanded);
 
@@ -1375,20 +1565,6 @@ async function init() {
     }
   });
 
-  window.addEventListener('beforeunload', () => {
-    if (dirty && invoke) {
-      invoke('cancel_appearance_preview').catch(() => {});
-    }
-  });
-
-  if (currentWindow?.onCloseRequested) {
-    currentWindow.onCloseRequested(() => {
-      if (dirty && invoke) {
-        invoke('cancel_appearance_preview').catch(() => {});
-      }
-    }).catch(() => {});
-  }
-
   if (listen) {
     listen('pillvyn://config', (e) => {
       if (!e.payload) return;
@@ -1398,6 +1574,27 @@ async function init() {
         syncSettingsTheme();
         renderSection();
       }
+    });
+    listen('pillvyn://position-updated', (e) => {
+      if (!e.payload || !config?.appearance) return;
+      config.appearance.top_offset = Number(e.payload.top_offset ?? config.appearance.top_offset);
+      config.appearance.x_offset = Number(e.payload.x_offset ?? config.appearance.x_offset);
+      if (e.payload.monitor_name !== undefined) {
+        config.appearance.monitor_name = e.payload.monitor_name;
+      }
+      if (e.payload.committed) {
+        savedConfig = structuredClone(config);
+        setDirtyState(false);
+      } else {
+        setDirtyState(true);
+      }
+      if (activeSection === 'behavior') {
+        syncBehaviorPositionWidgets();
+      }
+    });
+    listen('pillvyn://reposition-mode', (e) => {
+      repositionModeActive = Boolean(e.payload);
+      syncRepositionModeButton();
     });
     listen('pillvyn://island-state', (e) => {
       if (!e.payload) return;

@@ -5,6 +5,22 @@ All notable changes to **PILLVYN** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-16
+### Added
+- **Full Dynamic Island Repositioning (`Display & Behavior` + Desktop Move)**:
+  - Added an **Interactive Screen Positioner** canvas in Settings Studio (`settings.js`, `settings.css`) proportional to the selected monitor's logical workspace (`X` and `Y` drag + click-to-place with gentle center snap and live coordinate badge).
+  - Added one-click quick position presets (**Top Left**, **Top Center**, **Top Right**, **Center**, **Bottom Center**) and expanded horizontal & vertical sliders across the full active monitor bounds (`compute_island_window_position` in `island/mod.rs` and `PillvynConfig::sanitize` in `config.rs`).
+  - Added **Move on Desktop** (`set_reposition_mode` and `move_island_position` Tauri commands + `Escape` exit + screen-coordinate desktop capsule dragging in `main.js`) with bidirectional live synchronization back into Settings Studio (`pillvyn://position-updated`, `pillvyn://reposition-mode`).
+  - Automatically lifts bottom-docked islands cleanly inside the active monitor's logical bounds when expanded (`update_island_hitbox` + `compute_island_window_position`).
+
+### Fixed
+- **Settings Studio Unclosable Window Bug**:
+  - Removed the Tauri v2 JS `onCloseRequested` / `beforeunload` interception in `settings.js` that routed window close through `this.destroy()`, granted `core:window:allow-destroy` in `src-tauri/capabilities/settings.json`, and moved unsaved preview/reposition cleanup into a native non-blocking `win.on_window_event` hook (`restore_saved_appearance`) inside `open_settings_window()` so Settings Studio closes immediately via the X button, `Alt+F4`, or `WM_CLOSE`.
+- **Line-by-Line Coordination & Hardening Fixes**:
+  - Serialized config file writes with `CONFIG_IO_LOCK` and PID-scoped atomic temp files (`config.{pid}.tmp`) in `src-tauri/src/config.rs`.
+  - Switched Steam installation discovery in `src-tauri/src/services/gaming.rs` to native Win32 registry lookup (`RegGetValueW` on `Software\Valve\Steam\SteamPath`) with no environment-override fallback gaps.
+  - Refreshed live weather asynchronously when city/weather settings change in `save_app_config`, cleared stale `"timer-primary"` Live Activities when turning off Widgets, guarded Overview Quick Actions tiles when `modules.actions` is disabled, fixed boolean `false` attribute handling in `el()`, and added `.settings-topbar` flex-wrap support at narrow widths.
+
 ## [1.3.0] - 2026-11-16
 ### Fixed
 - **Taskbar Location Indicator & Background Subprocess Elimination**: Replaced `netsh wlan show interfaces` (`Network Command Shell`) polling with pure kernel NDIS `GetIfTable2` (`IF_TYPE_IEEE80211`) link detection in `system_ctrl.rs`, stopping the Windows 11 Location arrow icon from flashing in and out of the taskbar system tray. Also replaced background `powershell.exe` brightness queries/setters with native in-process COM WMI (`ROOT\WMI` `IWbemLocator`) and DDC/CI.

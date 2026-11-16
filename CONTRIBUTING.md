@@ -32,7 +32,7 @@ Drop a folder inside `%APPDATA%\pillvyn\PILLVYN\config\plugins\<your-plugin>\` c
 {
   "id": "my-plugin",
   "name": "My Utility",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "You",
   "description": "Triggers a custom Live Activity card.",
   "enabled": true,

@@ -1,6 +1,6 @@
 [package]
 name = "pillvyn"
-version = "1.3.0"
+version = "1.4.0"
 description = "PILLVYN — Premium, lightweight Dynamic Island for Windows 10 and Windows 11"
 authors = ["PILLVYN Contributors"]
 license = "MIT"
