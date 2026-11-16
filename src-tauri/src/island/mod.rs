@@ -123,8 +123,43 @@ pub fn apply_window_geometry(window: &WebviewWindow, cfg: &PillvynConfig) -> Res
 
     let _ = window.set_always_on_top(true);
     let _ = window.set_skip_taskbar(true);
+    enforce_tool_window(window);
     Ok(())
 }
+
+/// Strips `WS_EX_APPWINDOW` and forces `WS_EX_TOOLWINDOW` on frameless overlay/popup windows
+/// so Windows Explorer never flashes temporary taskbar buttons during show/hide/resize calls.
+#[cfg(target_os = "windows")]
+pub(crate) fn enforce_tool_window(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+
+    if let Ok(hwnd_raw) = window.hwnd() {
+        let hwnd = HWND(hwnd_raw.0 as *mut _);
+        unsafe {
+            let cur = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let next = (cur | (WS_EX_TOOLWINDOW.0 as isize)) & !(WS_EX_APPWINDOW.0 as isize);
+            if next != cur {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn enforce_tool_window(_window: &WebviewWindow) {}
 
 /// Starts a very low-overhead cursor hit-test loop that keeps transparent padding
 /// around the pill click-through (`WS_EX_TRANSPARENT`) while making the capsule itself interactive.

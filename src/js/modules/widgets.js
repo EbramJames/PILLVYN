@@ -16,6 +16,17 @@ export function renderWidgets(store, api) {
   const labelInput = el('input', { class: 'input-glass', placeholder: 'Timer label', value: 'Focus', style: { flex: '1' } });
   const minInput = el('input', { class: 'input-glass', type: 'number', min: '1', max: '180', value: '10', style: { width: '64px' } });
 
+  const startCustomTimer = () => {
+    const mins = Math.max(1, Math.min(240, Number(minInput.value) || 5));
+    api.timerAction('add', null, labelInput.value.trim() || 'Timer', mins * 60);
+  };
+  labelInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); startCustomTimer(); }
+  });
+  minInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); startCustomTimer(); }
+  });
+
   const swSec = Math.floor((store.stopwatchMs || 0) / 1000);
 
   const root = el('div', { class: 'stack' }, [
@@ -29,10 +40,12 @@ export function renderWidgets(store, api) {
         el('div', { class: 'card-title-row', style: { marginBottom: '2px' } }, [
           el('span', { class: 'card-label', text: weather?.city || 'Weather' }),
           el('button', {
+            type: 'button',
             class: 'pill-btn',
             style: { padding: '2px 8px', fontSize: '10px' },
+            disabled: Boolean(store.weatherLoading),
             onClick: () => api.refreshWeather(),
-          }, 'Sync'),
+          }, store.weatherLoading ? 'Syncing…' : 'Sync'),
         ]),
         el('div', { class: 'card-value', style: { fontSize: '18px' }, text: `${tempDisplay} · ${weather?.condition || 'Offline'}` }),
         el('div', {
@@ -52,11 +65,14 @@ export function renderWidgets(store, api) {
       ]),
       el('div', { style: { display: 'flex', gap: '6px' } }, [
         el('button', {
+          type: 'button',
           class: `pill-btn ${store.stopwatchRunning ? '' : 'primary'}`,
           onClick: () => api.timerAction(store.stopwatchRunning ? 'stopwatch_pause' : 'stopwatch_start'),
         }, store.stopwatchRunning ? 'Pause' : 'Start'),
         el('button', {
+          type: 'button',
           class: 'pill-btn',
+          disabled: swSec === 0 && !store.stopwatchRunning,
           onClick: () => api.timerAction('stopwatch_reset'),
         }, 'Reset'),
       ]),
@@ -77,11 +93,9 @@ export function renderWidgets(store, api) {
         labelInput,
         minInput,
         el('button', {
+          type: 'button',
           class: 'pill-btn primary',
-          onClick: () => {
-            const mins = Math.max(1, Math.min(240, Number(minInput.value) || 5));
-            api.timerAction('add', null, labelInput.value.trim() || 'Timer', mins * 60);
-          },
+          onClick: startCustomTimer,
         }, 'Start'),
       ]),
       store.timers.length > 0

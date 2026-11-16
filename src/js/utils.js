@@ -1,4 +1,58 @@
 // Safe DOM construction, formatting helpers, and crisp inline SVG icons.
+import { updateRangeTrackFill } from './theme.js';
+
+export function clampPercent(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+export function createRangeSlider({
+  value = 0,
+  min = 0,
+  max = 100,
+  step = 1,
+  disabled = false,
+  ariaLabel,
+  title,
+  onInputValue,
+  onCommitValue,
+  onDragState,
+}) {
+  const input = el('input', {
+    type: 'range',
+    class: 'range-slider',
+    min: String(min),
+    max: String(max),
+    step: String(step),
+    value: String(value),
+    disabled: Boolean(disabled),
+    'aria-label': ariaLabel,
+    title,
+  });
+  updateRangeTrackFill(input);
+
+  const stopBubble = (e) => {
+    e.stopPropagation();
+    if (!disabled) onDragState?.(true);
+  };
+  input.addEventListener('pointerdown', stopBubble);
+  input.addEventListener('mousedown', stopBubble);
+  input.addEventListener('touchstart', stopBubble, { passive: true });
+
+  input.addEventListener('input', () => {
+    updateRangeTrackFill(input);
+    onInputValue?.(Number(input.value), input);
+  });
+
+  input.addEventListener('change', () => {
+    updateRangeTrackFill(input);
+    onCommitValue?.(Number(input.value), input);
+    onDragState?.(false);
+  });
+
+  return input;
+}
 
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);

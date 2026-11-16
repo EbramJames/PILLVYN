@@ -166,27 +166,34 @@ export function renderCompactAndMinimized(store, api) {
   compactView.classList.toggle('peek-ready', canPeek);
   clear(peekEl);
   if (canPeek && api) {
+    const mkPeekBtn = (iconName, title, disabled, actionName) => {
+      const btn = el(
+        'button',
+        {
+          type: 'button',
+          class: 'peek-btn',
+          title,
+          disabled: Boolean(disabled),
+          onClick: (e) => {
+            e.stopPropagation();
+            if (!disabled) api.mediaControl(actionName);
+          },
+        },
+        icon(iconName, 11)
+      );
+      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      return btn;
+    };
+    peekEl.appendChild(mkPeekBtn('prev', 'Previous Track', media.can_previous === false, 'previous'));
     peekEl.appendChild(
-      el('button', {
-        class: 'peek-btn',
-        title: 'Previous Track',
-        onClick: (e) => { e.stopPropagation(); api.mediaControl('previous'); },
-      }, icon('prev', 11))
+      mkPeekBtn(
+        isPlaying ? 'pause' : 'play',
+        isPlaying ? 'Pause' : 'Play',
+        media.can_play_pause === false,
+        'play_pause'
+      )
     );
-    peekEl.appendChild(
-      el('button', {
-        class: 'peek-btn',
-        title: isPlaying ? 'Pause' : 'Play',
-        onClick: (e) => { e.stopPropagation(); api.mediaControl('play_pause'); },
-      }, icon(isPlaying ? 'pause' : 'play', 11))
-    );
-    peekEl.appendChild(
-      el('button', {
-        class: 'peek-btn',
-        title: 'Next Track',
-        onClick: (e) => { e.stopPropagation(); api.mediaControl('next'); },
-      }, icon('next', 11))
-    );
+    peekEl.appendChild(mkPeekBtn('next', 'Next Track', media.can_next === false, 'next'));
   }
 
   if (topAct?.badge && topAct.kind !== 'media') {

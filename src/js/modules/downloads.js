@@ -1,4 +1,4 @@
-import { el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
+import { clampPercent, el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
 
 export function renderDownloads(store) {
   const dl = store.downloads;
@@ -16,7 +16,7 @@ export function renderDownloads(store) {
   }
 
   return el('div', { class: 'stack' }, dl.items.map((item) => {
-    const pct = item.progress_percent != null ? Math.round(item.progress_percent) : null;
+    const pct = item.progress_percent != null ? Math.round(clampPercent(item.progress_percent)) : null;
     const sizeText = item.total_bytes
       ? `${formatBytes(item.downloaded_bytes)} / ${formatBytes(item.total_bytes)}`
       : formatBytes(item.downloaded_bytes);

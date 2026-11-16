@@ -45,6 +45,46 @@ const UTILITIES_SUBTABS = [
 
 let autoCollapseTimer = null;
 let suppressNextClickUntil = 0;
+let panelNoticeTimer = null;
+let deferredPanelRender = false;
+let rangeDragReleaseTimer = null;
+let localSystemLockUntil = 0;
+
+function createThrottledSender(delayMs, fn) {
+  let timer = null;
+  let lastSentAt = 0;
+  let pendingArgs = null;
+  return {
+    send(...args) {
+      const now = performance.now();
+      if (now - lastSentAt >= delayMs && !timer) {
+        lastSentAt = now;
+        fn(...args);
+        return;
+      }
+      pendingArgs = args;
+      if (!timer) {
+        const wait = Math.max(16, delayMs - (now - lastSentAt));
+        timer = setTimeout(() => {
+          timer = null;
+          lastSentAt = performance.now();
+          const next = pendingArgs;
+          pendingArgs = null;
+          if (next) fn(...next);
+        }, wait);
+      }
+    },
+    flush(...args) {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      pendingArgs = null;
+      lastSentAt = performance.now();
+      fn(...args);
+    },
+  };
+}
 
 function getEnabledMainTabs() {
   return MODULE_TABS.filter((tab) => isTabEnabled(tab, store.config));
@@ -112,29 +152,64 @@ function setIslandState(next) {
   }
 }
 
+const sendVolumeOut = createThrottledSender(48, (level) => {
+  invoke?.('set_volume', { isInput: false, level }).catch((err) => api.setPanelNotice(String(err), 'err'));
+});
+const sendVolumeIn = createThrottledSender(48, (level) => {
+  invoke?.('set_volume', { isInput: true, level }).catch((err) => api.setPanelNotice(String(err), 'err'));
+});
+const sendBrightness = createThrottledSender(90, (percent) => {
+  invoke?.('set_display_brightness', { percent }).catch((err) => api.setPanelNotice(String(err), 'err'));
+});
+
 const api = {
+  setPanelNotice(text, tone = 'err') {
+    clearTimeout(panelNoticeTimer);
+    patchStore({ panelNotice: text ? { text, tone } : null }, 'notice');
+    if (text) {
+      panelNoticeTimer = setTimeout(() => {
+        if (store.panelNotice?.text === text) {
+          patchStore({ panelNotice: null }, 'notice');
+        }
+      }, 3600);
+    }
+  },
+  clearPanelNotice() {
+    clearTimeout(panelNoticeTimer);
+    if (store.panelNotice) patchStore({ panelNotice: null }, 'notice');
+  },
+  setRangeDragging(active) {
+    const next = Boolean(active);
+    clearTimeout(rangeDragReleaseTimer);
+    if (next) {
+      store.rangeDragging = true;
+      return;
+    }
+    // Wait briefly after pointerup so the input's own `change` event commits before any deferred panel rebuild runs.
+    rangeDragReleaseTimer = setTimeout(() => {
+      store.rangeDragging = false;
+      if (deferredPanelRender) {
+        deferredPanelRender = false;
+        if (store.islandState === 'expanded' && !isUserInteractingInPanel()) {
+          renderActivePanel();
+        }
+      }
+    }, 60);
+  },
   switchTab(tabId) {
     const route = resolveTabRoute(tabId);
     const modules = store.config?.modules || {};
-    const requiredMod = {
-      music: 'music',
-      system: 'system',
-      hardware: 'hardware',
-      network: 'network',
-      downloads: 'downloads',
-      gaming: 'gaming',
-      notifications: 'notifications',
-      clipboard: 'clipboard',
-      actions: 'actions',
-      widgets: 'widgets',
-      plugins: 'plugins',
-      ai: 'ai',
-    }[route];
-    if (requiredMod && modules[requiredMod] === false) {
-      patchStore({ activeTab: 'overview' }, 'tab');
+    const targetMod = route.activeTab === 'monitor'
+      ? route.monitorSubTab
+      : route.activeTab === 'utilities'
+        ? route.utilitiesSubTab
+        : route.activeTab;
+    const isAiDisabled = targetMod === 'ai' && (modules.ai === false || !store.config?.ai?.enabled);
+    if (isAiDisabled || (targetMod && targetMod !== 'overview' && targetMod !== 'monitor' && targetMod !== 'utilities' && modules[targetMod] === false)) {
+      patchStore({ activeTab: 'overview', panelNotice: null }, 'tab');
       return;
     }
-    patchStore(route, 'tab-change');
+    patchStore({ ...route, panelNotice: null }, 'tab-change');
     if (store.islandState !== 'expanded') setIslandState('expanded');
   },
   switchMonitorSubTab(subId) {
@@ -146,7 +221,7 @@ const api = {
   togglePin() {
     const nextPinned = !store.pinned;
     patchStore({ pinned: nextPinned }, 'pin');
-    invoke?.('set_island_pinned', { pinned: nextPinned }).catch(console.error);
+    invoke?.('set_island_pinned', { pinned: nextPinned }).catch((err) => api.setPanelNotice(String(err), 'err'));
     if (nextPinned) {
       clearTimeout(autoCollapseTimer);
     } else if (!shell.matches(':hover')) {
@@ -154,35 +229,55 @@ const api = {
     }
   },
   mediaControl(action, seekSec = null, sourceId = null) {
-    invoke?.('media_control', { action, seekSec, sourceId }).catch(console.error);
+    if (action === 'seek' && seekSec != null) {
+      store.seekingUntil = performance.now() + 700;
+      if (store.media) store.media.position_sec = Number(seekSec);
+    }
+    invoke?.('media_control', { action, seekSec, sourceId }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
-  setVolume(isInput, level) {
-    invoke?.('set_volume', { isInput, level }).catch(console.error);
+  setVolume(isInput, level, commit = false) {
+    localSystemLockUntil = performance.now() + 450;
+    if (store.system) {
+      store.system[isInput ? 'mic_volume' : 'output_volume'] = level;
+    }
+    const sender = isInput ? sendVolumeIn : sendVolumeOut;
+    if (commit) sender.flush(level);
+    else sender.send(level);
   },
   setMute(isInput, muted) {
-    invoke?.('set_mute', { isInput, muted }).catch(console.error);
+    localSystemLockUntil = performance.now() + 450;
+    if (store.system) {
+      store.system[isInput ? 'mic_muted' : 'output_muted'] = Boolean(muted);
+    }
+    invoke?.('set_mute', { isInput, muted }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   switchAudioDevice(deviceId) {
-    invoke?.('switch_audio_device', { deviceId }).catch(console.error);
+    invoke?.('switch_audio_device', { deviceId }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
-  setBrightness(percent) {
-    invoke?.('set_display_brightness', { percent }).catch(console.error);
+  setBrightness(percent, commit = false) {
+    const rounded = Math.max(0, Math.min(100, Math.round(percent)));
+    localSystemLockUntil = performance.now() + 450;
+    if (store.system) {
+      store.system.brightness = rounded;
+    }
+    if (commit) sendBrightness.flush(rounded);
+    else sendBrightness.send(rounded);
   },
   pushNotification(appName, title, body, priority = 'normal') {
-    invoke?.('push_notification', { appName, title, body, priority }).catch(console.error);
+    invoke?.('push_notification', { appName, title, body, priority }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   notificationAction(action, id = null) {
     invoke?.('notification_action', { action, id }).then((snap) => {
       if (snap) patchStore({ notifications: snap }, 'notifications');
-    }).catch(console.error);
+    }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   clipboardAction(action, id = null) {
     invoke?.('clipboard_action', { action, id }).then((snap) => {
       if (snap) patchStore({ clipboard: snap }, 'clipboard');
-    }).catch(console.error);
+    }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   runQuickAction(item) {
-    invoke?.('run_quick_action', { item }).catch(console.error);
+    invoke?.('run_quick_action', { item }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   addQuickAction(item) {
     if (!store.config) return Promise.resolve(false);
@@ -209,20 +304,24 @@ const api = {
     return invoke('validate_quick_action_cmd', { kind, target });
   },
   openUrl(url) {
-    invoke?.('open_url', { url }).catch(console.error);
+    invoke?.('open_url', { url }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   timerAction(action, id = null, label = null, seconds = null) {
-    invoke?.('timer_action', { action, id, label, seconds }).catch(console.error);
+    invoke?.('timer_action', { action, id, label, seconds }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   refreshWeather() {
+    patchStore({ weatherLoading: true }, 'weather');
     invoke?.('refresh_weather').then((weather) => {
-      if (weather) patchStore({ weather }, 'weather');
-    }).catch(console.error);
+      patchStore({ weather, weatherLoading: false }, 'weather');
+    }).catch((err) => {
+      patchStore({ weatherLoading: false }, 'weather');
+      api.setPanelNotice(String(err), 'err');
+    });
   },
   pluginAction(action, pluginId = null, target = null) {
     invoke?.('plugin_action', { action, pluginId, target }).then((plugins) => {
       if (plugins) patchStore({ plugins }, 'plugins');
-    }).catch(console.error);
+    }).catch((err) => api.setPanelNotice(String(err), 'err'));
   },
   toggleGamingClickThrough() {
     if (!store.config) return;
@@ -321,6 +420,35 @@ function renderActivePanel() {
   }
 
   clear(panelEl);
+  if (store.panelNotice?.text) {
+    const toneColor = store.panelNotice.tone === 'err'
+      ? 'rgba(248, 113, 113, 0.4)'
+      : store.panelNotice.tone === 'warn'
+        ? 'rgba(251, 191, 36, 0.4)'
+        : 'rgba(52, 211, 153, 0.35)';
+    panelEl.appendChild(
+      el('div', {
+        class: 'notice-banner',
+        style: {
+          marginBottom: '8px',
+          borderColor: toneColor,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        },
+      }, [
+        el('span', { text: store.panelNotice.text }),
+        el('button', {
+          type: 'button',
+          class: 'icon-btn ghost',
+          style: { width: '20px', height: '20px', flexShrink: '0' },
+          title: 'Dismiss',
+          onClick: () => api.clearPanelNotice(),
+        }, icon('close', 11)),
+      ])
+    );
+  }
   if (content) panelEl.appendChild(content);
 }
 
@@ -389,12 +517,16 @@ function renderAll(_state, reason) {
   if (store.islandState === 'expanded') {
     renderActivitiesStrip(store, handleActivityClick);
     renderNavTabs(store, (tabId) => api.switchTab(tabId));
+    const isSeekingNow = store.activeTab === 'music' && reason === 'media' && performance.now() < (store.seekingUntil || 0);
+    const backgroundReasons = ['hardware', 'network', 'downloads', 'gaming', 'media', 'system', 'activities', 'timers', 'notifications', 'clipboard', 'weather', 'plugins', 'profile', 'config'];
     const skipInputClobber =
-      (reason === 'system' && store.activeTab === 'system' && document.activeElement?.type === 'range') ||
-      (reason === 'media' && store.activeTab === 'music' && document.activeElement?.type === 'range') ||
-      (['hardware', 'network', 'downloads', 'gaming', 'media', 'system', 'activities'].includes(reason) &&
-        isUserInteractingInPanel());
-    if (!skipInputClobber) {
+      isSeekingNow ||
+      (store.rangeDragging && backgroundReasons.includes(reason)) ||
+      (document.activeElement?.type === 'range' && backgroundReasons.includes(reason)) ||
+      (backgroundReasons.includes(reason) && isUserInteractingInPanel());
+    if (skipInputClobber) {
+      if (store.rangeDragging) deferredPanelRender = true;
+    } else {
       renderActivePanel();
     }
   }
@@ -448,10 +580,10 @@ viewCompact.addEventListener(
       const base =
         now - wheelBrightCache.ts < 400 && wheelBrightCache.val != null
           ? wheelBrightCache.val
-          : (store.system.brightness_percent ?? 50);
+          : (store.system.brightness ?? 50);
       const next = Math.max(0, Math.min(100, base + (e.deltaY < 0 ? 5 : -5)));
       wheelBrightCache = { ts: now, val: next };
-      api.setBrightness(next);
+      api.setBrightness(next, true);
     } else {
       const base =
         now - wheelVolCache.ts < 400 && wheelVolCache.val != null
@@ -459,7 +591,7 @@ viewCompact.addEventListener(
           : (store.system.output_volume ?? 0.5);
       const next = Math.max(0, Math.min(1, Number((base + (e.deltaY < 0 ? 0.04 : -0.04)).toFixed(2))));
       wheelVolCache = { ts: now, val: next };
-      api.setVolume(false, next);
+      api.setVolume(false, next, true);
     }
   },
   { passive: false }
@@ -469,8 +601,8 @@ viewCompact.addEventListener(
 let dragGesture = null;
 
 shell.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  if (e.target.closest('input, textarea, select, button, .range-slider')) return;
+  if (e.button !== 0 || store.rangeDragging) return;
+  if (e.target.closest('input, textarea, select, button, a, label, .range-slider, .peek-btn, .session-chip, .action-tile')) return;
   dragGesture = {
     x: e.clientX,
     y: e.clientY,
@@ -478,6 +610,10 @@ shell.addEventListener('pointerdown', (e) => {
     startedInHeaderOrNav: Boolean(e.target.closest('.expanded-header, .module-nav, .sub-nav')),
   };
 });
+
+window.addEventListener('pointerup', () => api.setRangeDragging(false));
+window.addEventListener('pointercancel', () => api.setRangeDragging(false));
+window.addEventListener('blur', () => api.setRangeDragging(false));
 
 shell.addEventListener('pointerup', (e) => {
   if (!dragGesture) return;
@@ -542,21 +678,11 @@ document.getElementById('btn-minimize').addEventListener('click', () => setIslan
 document.getElementById('btn-settings').addEventListener('click', () => api.openSettings());
 
 document.getElementById('btn-dnd').addEventListener('click', () => {
-  if (!store.config) return;
-  const nextCfg = structuredClone(store.config);
-  nextCfg.privacy.dnd_mode = !nextCfg.privacy.dnd_mode;
-  invoke?.('save_app_config', { newConfig: nextCfg }).then((saved) => {
-    if (saved) patchStore({ config: saved }, 'config');
-  });
+  invoke?.('tray_action', { action: 'toggle_dnd' }).catch((err) => api.setPanelNotice(String(err), 'err'));
 });
 
 document.getElementById('btn-focus').addEventListener('click', () => {
-  if (!store.config) return;
-  const nextCfg = structuredClone(store.config);
-  nextCfg.privacy.focus_mode = !nextCfg.privacy.focus_mode;
-  invoke?.('save_app_config', { newConfig: nextCfg }).then((saved) => {
-    if (saved) patchStore({ config: saved }, 'config');
-  });
+  invoke?.('tray_action', { action: 'toggle_focus' }).catch((err) => api.setPanelNotice(String(err), 'err'));
 });
 
 shell.addEventListener('mouseenter', () => {
@@ -656,11 +782,27 @@ async function bootstrap() {
         ...(store.config || {}),
         appearance: e.payload,
       };
-      patchStore({ config: nextCfg }, 'config');
+      store.config = nextCfg;
+      applyVisualTheme(shell, nextCfg, store.activeProfile);
+      requestAnimationFrame(reportHitbox);
     });
     await listen('pillvyn://activities', (e) => patchStore({ activities: e.payload }, 'activities'));
-    await listen('pillvyn://media', (e) => patchStore({ media: e.payload }, 'media'));
-    await listen('pillvyn://system', (e) => patchStore({ system: e.payload }, 'system'));
+    await listen('pillvyn://media', (e) => {
+      const incoming = e.payload;
+      if (incoming && store.seekingUntil && performance.now() < store.seekingUntil && store.media) {
+        incoming.position_sec = store.media.position_sec;
+      }
+      patchStore({ media: incoming }, 'media');
+    });
+    await listen('pillvyn://system', (e) => {
+      const incoming = e.payload;
+      if (incoming && (store.rangeDragging || performance.now() < localSystemLockUntil) && store.system) {
+        incoming.output_volume = store.system.output_volume;
+        incoming.mic_volume = store.system.mic_volume;
+        incoming.brightness = store.system.brightness;
+      }
+      patchStore({ system: incoming }, 'system');
+    });
     await listen('pillvyn://hardware', (e) => patchStore({ hardware: e.payload }, 'hardware'));
     await listen('pillvyn://gaming', (e) => patchStore({ gaming: e.payload }, 'gaming'));
     await listen('pillvyn://downloads', (e) => patchStore({ downloads: e.payload }, 'downloads'));
@@ -686,6 +828,9 @@ async function bootstrap() {
       if (store.islandState === 'expanded' && !store.pinned) {
         setIslandState('compact');
       }
+    });
+    await listen('pillvyn://set-expanded', (e) => {
+      setIslandState(e.payload ? 'expanded' : 'compact');
     });
     await listen('pillvyn://hotkey', (e) => {
       if (e.payload === 'toggle_expand') {

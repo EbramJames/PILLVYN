@@ -7,14 +7,16 @@ use commands::{
     ask_ai_assistant, cancel_appearance_preview, check_updates, clipboard_action,
     get_initial_state, get_monitors, get_tray_state, media_control, notification_action,
     open_settings_window, open_url, plugin_action, preview_appearance, push_notification,
-    refresh_weather, run_quick_action, save_app_config, save_settings_config,
+    refresh_weather, resize_tray_window, run_quick_action, save_app_config, save_settings_config,
     set_click_through_override, set_display_brightness, set_island_pinned, set_mute, set_volume,
     switch_audio_device, sync_timer_activity, timer_action, tray_action, update_island_hitbox,
     validate_quick_action_cmd, AppState, TrayStateSnapshot,
 };
 use config::{load_config, save_config, AppProfile, PillvynConfig};
 use island::activities::{now_ms, ActivityCoordinator, ActivityKind, LiveActivity};
-use island::{apply_window_geometry, spawn_click_through_controller, IslandWindowState};
+use island::{
+    apply_window_geometry, enforce_tool_window, spawn_click_through_controller, IslandWindowState,
+};
 use services::clipboard::{spawn_clipboard_listener, ClipboardStore};
 use services::downloads::{DownloadMonitor, DownloadsSnapshot};
 use services::gaming::{query_foreground_window_process, GamingMonitor};
@@ -30,12 +32,12 @@ use services::system_ctrl::{
 use services::widgets::{fetch_live_weather, WidgetEngine};
 use services::win_hooks::{spawn_foreground_hook, take_external_foreground_flag};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -43,6 +45,9 @@ use tokio::sync::Notify;
 use tracing::{info, warn};
 
 static LAST_TRAY_BLUR_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_TRAY_CLICK_X: AtomicI32 = AtomicI32::new(0);
+static LAST_TRAY_CLICK_Y: AtomicI32 = AtomicI32::new(0);
+static HAS_TRAY_CLICK: AtomicBool = AtomicBool::new(false);
 
 fn normalize_hotkey_combo(combo: &str) -> String {
     combo
@@ -154,6 +159,7 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
     match action {
         "toggle_visibility" => toggle_island_visibility(app),
         "toggle_expand" => {
+            let mut next_expanded = true;
             if let Some(w) = app.get_webview_window("island") {
                 if let Some(state) = app.try_state::<AppState>() {
                     let mut was_hidden = false;
@@ -162,6 +168,17 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                             ws.is_visible = true;
                             was_hidden = true;
                         }
+                    }
+                    if let Ok(mut exp) = state.island_expanded.lock() {
+                        next_expanded = if was_hidden { true } else { !*exp };
+                        *exp = next_expanded;
+                    }
+                    if next_expanded {
+                        if let Ok(mut ts) = state.last_expanded_ms.lock() {
+                            *ts = now_ms();
+                        }
+                    } else if let Ok(mut pinned) = state.island_pinned.lock() {
+                        *pinned = false;
                     }
                     if was_hidden {
                         if let Ok(cfg) = state.config.lock() {
@@ -172,9 +189,10 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                 if !w.is_visible().unwrap_or(false) {
                     let _ = w.show();
                 }
+                enforce_tool_window(&w);
             }
             emit_island_state(app);
-            let _ = app.emit("pillvyn://hotkey", "toggle_expand");
+            let _ = app.emit("pillvyn://set-expanded", next_expanded);
         }
         "clipboard_drawer" => {
             if let Some(w) = app.get_webview_window("island") {
@@ -186,6 +204,12 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                             was_hidden = true;
                         }
                     }
+                    if let Ok(mut exp) = state.island_expanded.lock() {
+                        *exp = true;
+                    }
+                    if let Ok(mut ts) = state.last_expanded_ms.lock() {
+                        *ts = now_ms();
+                    }
                     if was_hidden {
                         if let Ok(cfg) = state.config.lock() {
                             let _ = apply_window_geometry(&w, &cfg);
@@ -195,6 +219,7 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                 if !w.is_visible().unwrap_or(false) {
                     let _ = w.show();
                 }
+                enforce_tool_window(&w);
             }
             emit_island_state(app);
             let _ = app.emit("pillvyn://hotkey", "clipboard_drawer");
@@ -429,6 +454,7 @@ pub fn run() {
             preview_appearance,
             cancel_appearance_preview,
             get_tray_state,
+            resize_tray_window,
             tray_action,
             open_settings_window,
             media_control,
@@ -507,6 +533,7 @@ fn ensure_tray_window(app: &AppHandle) -> Option<WebviewWindow> {
 
     match builder.build() {
         Ok(win) => {
+            enforce_tool_window(&win);
             let win_clone = win.clone();
             win.on_window_event(move |event| match event {
                 WindowEvent::Focused(false) => {
@@ -528,23 +555,23 @@ fn ensure_tray_window(app: &AppHandle) -> Option<WebviewWindow> {
     }
 }
 
-fn show_tray_menu_near(app: &AppHandle, position: PhysicalPosition<f64>) {
-    let Some(tray_win) = ensure_tray_window(app) else {
-        return;
-    };
+pub(crate) fn position_and_resize_tray(
+    app: &AppHandle,
+    tray_win: &WebviewWindow,
+    logical_height: Option<f64>,
+) {
+    enforce_tool_window(tray_win);
 
-    if tray_win.is_visible().unwrap_or(false) {
-        let _ = tray_win.hide();
-        return;
+    if let Some(h) = logical_height {
+        let clamped_h = h.clamp(240.0, 440.0);
+        let _ = tray_win.set_size(LogicalSize::new(TRAY_MENU_LOGICAL_WIDTH, clamped_h));
     }
 
-    let elapsed_since_blur = now_ms().saturating_sub(LAST_TRAY_BLUR_MS.load(Ordering::Relaxed));
-    if elapsed_since_blur < 220 {
+    if !HAS_TRAY_CLICK.load(Ordering::Relaxed) {
         return;
     }
-
-    let click_x = position.x.round() as i32;
-    let click_y = position.y.round() as i32;
+    let click_x = LAST_TRAY_CLICK_X.load(Ordering::Relaxed);
+    let click_y = LAST_TRAY_CLICK_Y.load(Ordering::Relaxed);
 
     let monitor = app
         .available_monitors()
@@ -584,6 +611,28 @@ fn show_tray_menu_near(app: &AppHandle, position: PhysicalPosition<f64>) {
         );
         let _ = tray_win.set_position(PhysicalPosition::new(x, y));
     }
+}
+
+fn show_tray_menu_near(app: &AppHandle, position: PhysicalPosition<f64>) {
+    let Some(tray_win) = ensure_tray_window(app) else {
+        return;
+    };
+
+    if tray_win.is_visible().unwrap_or(false) {
+        let _ = tray_win.hide();
+        return;
+    }
+
+    let elapsed_since_blur = now_ms().saturating_sub(LAST_TRAY_BLUR_MS.load(Ordering::Relaxed));
+    if elapsed_since_blur < 220 {
+        return;
+    }
+
+    LAST_TRAY_CLICK_X.store(position.x.round() as i32, Ordering::Relaxed);
+    LAST_TRAY_CLICK_Y.store(position.y.round() as i32, Ordering::Relaxed);
+    HAS_TRAY_CLICK.store(true, Ordering::Relaxed);
+
+    position_and_resize_tray(app, &tray_win, None);
 
     let _ = app.emit("pillvyn://tray-refresh", ());
     let _ = tray_win.set_always_on_top(true);

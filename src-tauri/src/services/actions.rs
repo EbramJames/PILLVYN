@@ -94,15 +94,8 @@ pub fn execute_quick_action(item: &QuickActionItem) -> Result<(), String> {
 }
 
 pub fn open_external_url(url: &str) -> Result<(), String> {
-    let trimmed = url.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if !lower.starts_with("https://")
-        && !lower.starts_with("http://")
-        && !lower.starts_with("ms-settings:")
-    {
-        return Err("Only http(s) and ms-settings URIs can be opened".into());
-    }
-    open_shell_target(trimmed)
+    let validated = validate_quick_action("uri", url)?;
+    open_shell_target(&validated)
 }
 
 #[cfg(target_os = "windows")]
@@ -164,5 +157,12 @@ mod tests {
             target: "javascript:alert(1)".into(),
         };
         assert!(execute_quick_action(&bad_uri).is_err());
+
+        assert_eq!(
+            validate_quick_action("uri", "  ms-availablenetworks:  ").unwrap(),
+            "ms-availablenetworks:"
+        );
+        assert!(open_external_url("javascript:alert(1)").is_err());
+        assert!(open_external_url("").is_err());
     }
 }

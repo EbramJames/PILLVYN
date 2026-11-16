@@ -15,15 +15,18 @@ export function renderNotifications(store, api) {
       }),
       el('div', { style: { display: 'flex', gap: '5px' } }, [
         el('button', {
+          type: 'button',
           class: 'pill-btn',
           onClick: () => api.pushNotification('PILLVYN', 'Alert Channel Verified', 'Notification pipeline & priority routing active.', 'normal'),
         }, 'Test Alert'),
         el('button', {
+          type: 'button',
           class: 'pill-btn',
-          disabled: items.length === 0,
+          disabled: items.length === 0 || (hub?.unread_count || 0) === 0,
           onClick: () => api.notificationAction('mark_all_read'),
         }, 'Read All'),
         el('button', {
+          type: 'button',
           class: 'pill-btn danger',
           disabled: items.length === 0,
           onClick: () => api.notificationAction('clear_all'),
@@ -66,6 +69,7 @@ export function renderNotifications(store, api) {
           el('div', { class: 'muted', style: { fontSize: '10px', marginTop: '2px' }, text: `${formatRelativeTime(n.timestamp_ms)}${n.suppressed_by_dnd ? ' · Muted by DND' : ''}` }),
         ]),
         el('button', {
+          type: 'button',
           class: 'icon-btn',
           style: { width: '24px', height: '24px' },
           title: 'Dismiss',

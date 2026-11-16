@@ -75,6 +75,7 @@ pub struct InitialDashboardPayload {
     pub active_profile: Option<AppProfile>,
     pub island_pinned: bool,
     pub island_visible: bool,
+    pub island_expanded: bool,
     pub config_warnings: Vec<String>,
     pub app_version: String,
 }
@@ -149,6 +150,7 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
         .lock()
         .map(|g| g.is_visible)
         .unwrap_or(true);
+    let island_expanded = state.island_expanded.lock().map(|g| *g).unwrap_or(false);
     let config_warnings = state
         .config_warnings
         .lock()
@@ -175,6 +177,7 @@ pub fn get_initial_state(app: AppHandle, state: State<'_, AppState>) -> InitialD
         active_profile,
         island_pinned,
         island_visible,
+        island_expanded,
         config_warnings,
         app_version: app.package_info().version.to_string(),
     }
@@ -262,6 +265,18 @@ pub fn save_app_config(
     }
     if let Some(island) = app.get_webview_window("island") {
         let _ = apply_window_geometry(&island, &new_config);
+    }
+    let game_active = state
+        .latest_gaming
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|s| s.active))
+        .unwrap_or(false);
+    if let Ok(mut ws) = state.window_state.lock() {
+        ws.force_click_through = new_config.modules.gaming
+            && new_config.gaming.auto_detect
+            && new_config.gaming.click_through_hud
+            && game_active;
     }
 
     // Apply Windows autostart setting cleanly
@@ -360,6 +375,15 @@ pub struct TrayStateSnapshot {
 #[tauri::command]
 pub fn get_tray_state(app: AppHandle, state: State<'_, AppState>) -> TrayStateSnapshot {
     crate::build_tray_state_snapshot(&app, &state)
+}
+
+#[tauri::command]
+pub fn resize_tray_window(app: AppHandle, height: f64) {
+    if let Some(tray_win) = app.get_webview_window("tray") {
+        if tray_win.is_visible().unwrap_or(false) {
+            crate::position_and_resize_tray(&app, &tray_win, Some(height));
+        }
+    }
 }
 
 #[tauri::command]
@@ -850,8 +874,10 @@ pub async fn ask_ai_assistant(
 pub async fn check_updates(
     app: AppHandle,
     state: State<'_, AppState>,
+    consent_override: Option<bool>,
+    repo_override: Option<String>,
 ) -> Result<UpdateCheckResult, String> {
-    let (consent, repo) = state
+    let (saved_consent, saved_repo) = state
         .config
         .lock()
         .map(|g| {
@@ -861,6 +887,11 @@ pub async fn check_updates(
             )
         })
         .unwrap_or((false, "EbramJames/PILLVYN".into()));
+    let consent = consent_override.unwrap_or(saved_consent);
+    let repo = repo_override
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .unwrap_or(saved_repo);
     let ver = app.package_info().version.to_string();
     check_for_updates(&ver, &repo, consent).await
 }

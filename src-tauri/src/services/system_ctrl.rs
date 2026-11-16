@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
@@ -358,6 +357,147 @@ fn query_ddc_brightness() -> Option<u32> {
 }
 
 #[cfg(target_os = "windows")]
+fn connect_wmi_root() -> Option<windows::Win32::System::Wmi::IWbemServices> {
+    use windows::core::{IUnknown, Interface, BSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoSetProxyBlanket, CLSCTX_INPROC_SERVER, EOAC_NONE,
+        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+    };
+    use windows::Win32::System::Wmi::{IWbemLocator, IWbemServices, WbemLocator};
+
+    const RPC_C_AUTHN_WINNT: u32 = 10;
+    const RPC_C_AUTHZ_NONE: u32 = 0;
+
+    unsafe {
+        let locator: IWbemLocator =
+            CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).ok()?;
+        let services: IWbemServices = locator
+            .ConnectServer(
+                &BSTR::from("ROOT\\WMI"),
+                &BSTR::new(),
+                &BSTR::new(),
+                &BSTR::new(),
+                0,
+                &BSTR::new(),
+                None,
+            )
+            .ok()?;
+        if let Ok(unk) = services.cast::<IUnknown>() {
+            let _ = CoSetProxyBlanket(
+                &unk,
+                RPC_C_AUTHN_WINNT,
+                RPC_C_AUTHZ_NONE,
+                None,
+                RPC_C_AUTHN_LEVEL_CALL,
+                RPC_C_IMP_LEVEL_IMPERSONATE,
+                None,
+                EOAC_NONE,
+            );
+        }
+        Some(services)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_wmi_brightness(clamped: u32) -> bool {
+    use windows::core::{w, BSTR, VARIANT};
+    use windows::Win32::System::Wmi::{WBEM_FLAG_FORWARD_ONLY, WBEM_INFINITE};
+
+    let _com = ComGuard::init();
+    let Some(services) = connect_wmi_root() else {
+        return false;
+    };
+
+    unsafe {
+        let Ok(enumerator) = services.ExecQuery(
+            &BSTR::from("WQL"),
+            &BSTR::from("SELECT __PATH FROM WmiMonitorBrightnessMethods"),
+            WBEM_FLAG_FORWARD_ONLY,
+            None,
+        ) else {
+            return false;
+        };
+
+        let mut objects = [None];
+        let mut returned = 0u32;
+        if enumerator
+            .Next(WBEM_INFINITE, &mut objects, &mut returned)
+            .is_err()
+            || returned == 0
+        {
+            return false;
+        }
+        let Some(instance) = objects[0].take() else {
+            return false;
+        };
+
+        let mut path_var = VARIANT::new();
+        if instance
+            .Get(w!("__PATH"), 0, &mut path_var, None, None)
+            .is_err()
+        {
+            return false;
+        }
+        let Ok(obj_path) = BSTR::try_from(&path_var) else {
+            return false;
+        };
+
+        let mut class_obj = None;
+        if services
+            .GetObject(
+                &BSTR::from("WmiMonitorBrightnessMethods"),
+                Default::default(),
+                None,
+                Some(&mut class_obj),
+                None,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        let Some(class_obj) = class_obj else {
+            return false;
+        };
+
+        let mut in_sig = None;
+        if class_obj
+            .GetMethod(w!("WmiSetBrightness"), 0, &mut in_sig, std::ptr::null_mut())
+            .is_err()
+        {
+            return false;
+        }
+        let Some(in_sig) = in_sig else {
+            return false;
+        };
+
+        let Ok(in_params) = in_sig.SpawnInstance(0) else {
+            return false;
+        };
+        let timeout_var = VARIANT::from(1u32);
+        let brightness_var = VARIANT::from((clamped.min(100)) as u8);
+        if in_params.Put(w!("Timeout"), 0, &timeout_var, 0).is_err()
+            || in_params
+                .Put(w!("Brightness"), 0, &brightness_var, 0)
+                .is_err()
+        {
+            return false;
+        }
+
+        services
+            .ExecMethod(
+                &obj_path,
+                &BSTR::from("WmiSetBrightness"),
+                Default::default(),
+                None,
+                &in_params,
+                None,
+                None,
+            )
+            .is_ok()
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn set_brightness_percent(percent: u32) -> Result<(), String> {
     use windows::Win32::Devices::Display::{
         DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
@@ -372,17 +512,10 @@ pub fn set_brightness_percent(percent: u32) -> Result<(), String> {
         .ok()
         .is_some_and(|c| c.wmi_retry_after.is_some_and(|t| Instant::now() < t));
 
-    // Try WMI internal panel brightness first on laptops unless recently known unsupported
-    if !skip_wmi {
-        let wmi_script = format!(
-            "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | Select-Object -First 1) | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=1; Brightness={clamped}}}"
-        );
-        if let Ok(out) = hidden_powershell(&wmi_script) {
-            if out.status.success() && out.stdout.len() > 2 {
-                cache_brightness_value(Some(clamped));
-                return Ok(());
-            }
-        }
+    // Try native COM WMI internal panel brightness first on laptops unless known unsupported
+    if !skip_wmi && set_wmi_brightness(clamped) {
+        cache_brightness_value(Some(clamped));
+        return Ok(());
     }
 
     // Fallback to native DDC/CI physical monitor brightness
@@ -519,57 +652,90 @@ fn cached_query_wifi(force_refresh: bool) -> (bool, Option<String>) {
 
 #[cfg(target_os = "windows")]
 fn query_wmi_brightness() -> Option<u32> {
-    let out = hidden_powershell(
-        "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | Select-Object -First 1).CurrentBrightness",
-    )
-    .ok()?;
-    if !out.status.success() {
-        return None;
+    use windows::core::{w, BSTR, VARIANT};
+    use windows::Win32::System::Wmi::{WBEM_FLAG_FORWARD_ONLY, WBEM_INFINITE};
+
+    let _com = ComGuard::init();
+    let services = connect_wmi_root()?;
+    unsafe {
+        let enumerator = services
+            .ExecQuery(
+                &BSTR::from("WQL"),
+                &BSTR::from("SELECT CurrentBrightness FROM WmiMonitorBrightness"),
+                WBEM_FLAG_FORWARD_ONLY,
+                None,
+            )
+            .ok()?;
+
+        let mut objects = [None];
+        let mut returned = 0u32;
+        if enumerator
+            .Next(WBEM_INFINITE, &mut objects, &mut returned)
+            .is_err()
+            || returned == 0
+        {
+            return None;
+        }
+        let instance = objects[0].take()?;
+        let mut val = VARIANT::new();
+        instance
+            .Get(w!("CurrentBrightness"), 0, &mut val, None, None)
+            .ok()?;
+        u32::try_from(&val).ok().map(|v| v.min(100))
     }
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    text.parse::<u32>().ok().map(|v| v.min(100))
 }
 
-#[cfg(target_os = "windows")]
-fn hidden_powershell(script: &str) -> std::io::Result<std::process::Output> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-}
-
+/// Checks native Wi-Fi link state via Windows IP Helper (`GetIfTable2`) for
+/// `IF_TYPE_IEEE80211` (71) without spawning `netsh.exe` or querying Location-gated WLAN SSIDs.
 #[cfg(target_os = "windows")]
 fn query_wifi_status() -> (bool, Option<String>) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let Ok(out) = Command::new("netsh")
-        .args(["wlan", "show", "interfaces"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
-        return (false, None);
+    use windows::Win32::NetworkManagement::IpHelper::{
+        FreeMibTable, GetIfTable2, MIB_IF_ROW2, MIB_IF_TABLE2,
     };
-    let text = String::from_utf8_lossy(&out.stdout);
+    use windows::Win32::NetworkManagement::Ndis::{IfOperStatusUp, MediaConnectStateConnected};
+
+    const IF_TYPE_IEEE80211: u32 = 71;
     let mut connected = false;
-    let mut ssid = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("State") && trimmed.to_ascii_lowercase().contains("connected") {
-            if !trimmed.to_ascii_lowercase().contains("disconnected") {
-                connected = true;
+    let mut adapter_label = None;
+
+    unsafe {
+        let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+        if GetIfTable2(&mut table).is_err() || table.is_null() {
+            return (false, None);
+        }
+
+        let count = (*table).NumEntries as usize;
+        let rows: &[MIB_IF_ROW2] = std::slice::from_raw_parts((*table).Table.as_ptr(), count);
+        for row in rows {
+            if row.Type != IF_TYPE_IEEE80211 {
+                continue;
             }
-        } else if trimmed.starts_with("SSID") && !trimmed.starts_with("BSSID") {
-            if let Some((_, val)) = trimmed.split_once(':') {
-                let s = val.trim().to_string();
-                if !s.is_empty() {
-                    ssid = Some(s);
+            if (row.InterfaceAndOperStatusFlags._bitfield & 0b10) != 0 {
+                continue;
+            }
+            if row.OperStatus == IfOperStatusUp
+                && row.MediaConnectState == MediaConnectStateConnected
+            {
+                connected = true;
+                let len = row
+                    .Alias
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(row.Alias.len());
+                let alias = String::from_utf16_lossy(&row.Alias[..len])
+                    .trim()
+                    .to_string();
+                if !alias.is_empty() {
+                    adapter_label = Some(alias);
                 }
+                break;
             }
         }
+
+        FreeMibTable(table as *const _);
     }
-    (connected, ssid)
+
+    (connected, adapter_label)
 }
 
 #[cfg(target_os = "windows")]

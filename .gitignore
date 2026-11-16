@@ -26,4 +26,5 @@ npm-debug.log*
 *.msi
 *.sig
 *.zip
+docs/bug/
 !src-tauri/icons/**

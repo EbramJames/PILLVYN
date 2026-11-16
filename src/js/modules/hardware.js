@@ -1,4 +1,4 @@
-import { el, formatBytes } from '../utils.js';
+import { clampPercent, el, formatBytes } from '../utils.js';
 
 export function renderHardware(store) {
   const hw = store.hardware;
@@ -6,8 +6,8 @@ export function renderHardware(store) {
     return el('div', { class: 'empty-state', text: 'Collecting CPU, RAM, GPU, and storage telemetry…' });
   }
 
-  const cpuPct = Math.round(hw.cpu_usage_percent || 0);
-  const ramPct = Math.round(hw.ram_percent || 0);
+  const cpuPct = Math.round(clampPercent(hw.cpu_usage_percent || 0));
+  const ramPct = Math.round(clampPercent(hw.ram_percent || 0));
   const ghz = hw.cpu_freq_mhz ? `${(hw.cpu_freq_mhz / 1000).toFixed(2)} GHz` : '--';
 
   const root = el('div', { class: 'stack' }, [
@@ -41,7 +41,7 @@ export function renderHardware(store) {
 
   if (hw.gpus && hw.gpus.length > 0) {
     for (const gpu of hw.gpus) {
-      const util = gpu.utilization_percent;
+      const util = gpu.utilization_percent != null ? Math.round(clampPercent(gpu.utilization_percent)) : null;
       const vram = gpu.vram_used_mb != null && gpu.vram_total_mb != null
         ? `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB VRAM`
         : (gpu.vram_total_mb ? `${gpu.vram_total_mb} MB VRAM` : 'Shared Memory');
@@ -74,7 +74,7 @@ export function renderHardware(store) {
       el('div', { class: 'glass-card' }, [
         el('div', { class: 'card-label', style: { marginBottom: '6px' }, text: 'Storage Volumes' }),
         el('div', { class: 'stack', style: { gap: '6px' } }, hw.disks.map((d) => {
-          const pct = Math.round(d.used_percent || 0);
+          const pct = Math.round(clampPercent(d.used_percent || 0));
           return el('div', {}, [
             el('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' } }, [
               el('span', { text: `${d.mount} ${d.name ? `(${d.name})` : ''}` }),

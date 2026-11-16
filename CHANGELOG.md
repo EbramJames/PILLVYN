@@ -5,6 +5,19 @@ All notable changes to **PILLVYN** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-16
+### Fixed
+- **Taskbar Location Indicator & Background Subprocess Elimination**: Replaced `netsh wlan show interfaces` (`Network Command Shell`) polling with pure kernel NDIS `GetIfTable2` (`IF_TYPE_IEEE80211`) link detection in `system_ctrl.rs`, stopping the Windows 11 Location arrow icon from flashing in and out of the taskbar system tray. Also replaced background `powershell.exe` brightness queries/setters with native in-process COM WMI (`ROOT\WMI` `IWbemLocator`) and DDC/CI.
+- **ToolWindow Styles & Tray Window Resize Clamping**: Forced `WS_EX_TOOLWINDOW` and cleared `WS_EX_APPWINDOW` on both `island` and `tray` windows, and replaced background hidden `setSize` calls with `resize_tray_window` clamped strictly to visible updates inside monitor `work_area`.
+- **Every Drag Bar & Slider Across Island & Settings**:
+  - Added shared `createRangeSlider` (`utils.js`) and enlarged clickable range hit targets (`18px` interactive height, `5px`/`6px` visual track) across Hub, Media Seek, System Controls, and Settings Studio.
+  - Prevented background telemetry (`timers`, `notifications`, `clipboard`, `weather`, `plugins`, `media`, `system`, `activities`) and capsule swipe gestures from interrupting or rebuilding active slider drags, and kept live `%` / track-time readouts updated continuously during drags.
+  - Synchronized Settings Studio slider factory defaults (`opacity = 0.88`, `hardware_interval_ms = 2000`, `clipboard_max_items = 25`) with Rust defaults, fixed `.slider-bound` wrapping, and accurately rendered capsule scale in the live preview stage.
+- **Buttons, Focus & Sync Accuracy**:
+  - Fixed `open_external_url()` (`actions.rs`) so the **Wi-Fi Flyout** (`ms-availablenetworks:`) button works alongside `ms-settings:` and HTTPS links.
+  - Fixed Clipboard search input losing focus after each typed character (`clipboard.js`), preserved AI draft prompts during re-renders (`plugins.js`), fixed disabled styling/states on media transport & hover-peek buttons, stopwatch `Reset`, and notification `Read All`.
+  - Fixed Settings Studio **Check Now** failing when **Allow Update Checks** was toggled before saving, added initial `island_expanded` state & dynamic `Hide Island`/`Show Island` and `Expand`/`Collapse` sidebar labels, fixed synchronous `toggle_expand` tray/hotkey state updates (`pillvyn://set-expanded`), and surfaced actionable error banners instead of swallowing IPC failures.
+
 ## [1.2.0] - 2026-11-16
 ### Added
 - **Custom Obsidian Glass Tray Menu (`tray.html`)**: Replaced the native Windows tray right-click menu with a bespoke frameless Obsidian Glass popover featuring live Island status, optional Now Playing strip, instant toggles for Visibility, Expand/Collapse, Do Not Disturb, Focus Mode, Settings Studio, and Quit — automatically clamped inside the active monitor work area for both taskbar and tray-overflow clicks.

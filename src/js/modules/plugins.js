@@ -56,14 +56,17 @@ export function renderPlugins(store, api) {
   return root;
 }
 
+let aiDraftPrompt = '';
+
 export function renderAi(store, api) {
   const aiCfg = store.config?.ai;
   if (!aiCfg?.enabled) {
     return el('div', { class: 'empty-state' }, [
       icon('sparkles', 22),
       el('div', { style: { marginTop: '6px', fontWeight: '600', color: 'var(--text-primary)' }, text: 'Optional AI Assistant Disabled' }),
-      el('div', { class: 'muted', style: { marginTop: '4px' }, text: 'Enable local Ollama or a custom OpenAI-compatible endpoint in Settings -> Integrations & AI.' }),
+      el('div', { class: 'muted', style: { marginTop: '4px' }, text: 'Enable local Ollama or a custom OpenAI-compatible endpoint in Modules & Tools inside Settings Studio.' }),
       el('button', {
+        type: 'button',
         class: 'pill-btn primary',
         style: { marginTop: '10px' },
         onClick: () => api.openSettings(),
@@ -76,6 +79,25 @@ export function renderAi(store, api) {
     rows: '2',
     placeholder: `Ask ${aiCfg.model} via ${aiCfg.provider}…`,
   });
+  promptBox.value = aiDraftPrompt;
+
+  const submitBtn = el('button', {
+    type: 'button',
+    class: 'pill-btn primary',
+    disabled: store.aiLoading || !aiDraftPrompt.trim(),
+    onClick: () => api.askAi(promptBox.value),
+  }, store.aiLoading ? 'Thinking…' : 'Send Prompt');
+
+  promptBox.addEventListener('input', (e) => {
+    aiDraftPrompt = e.target.value;
+    submitBtn.disabled = store.aiLoading || !aiDraftPrompt.trim();
+  });
+  promptBox.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && aiDraftPrompt.trim() && !store.aiLoading) {
+      e.preventDefault();
+      api.askAi(promptBox.value);
+    }
+  });
 
   const root = el('div', { class: 'stack' }, [
     el('div', { class: 'glass-card' }, [
@@ -85,11 +107,7 @@ export function renderAi(store, api) {
       ]),
       promptBox,
       el('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '8px' } }, [
-        el('button', {
-          class: 'pill-btn primary',
-          disabled: store.aiLoading,
-          onClick: () => api.askAi(promptBox.value),
-        }, store.aiLoading ? 'Thinking…' : 'Send Prompt'),
+        submitBtn,
       ]),
     ]),
   ]);

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.2.0" src="https://img.shields.io/badge/Version-v1.2.0-f4f7ff?labelColor=090a0e" /></a>
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.3.0" src="https://img.shields.io/badge/Version-v1.3.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -40,8 +40,14 @@
 | :---: |
 | <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
 
-## Features & v1.2.0 Highlights
+## Features & v1.3.0 Highlights
 
+- **Zero-Spawn Windows Integration & Taskbar Cleanliness**:
+  - Replaced background `netsh.exe` and `powershell.exe` child-process polling with pure in-process Windows `GetIfTable2` IEEE 802.11 link detection and native COM `IWbemLocator` + DDC/CI brightness — eliminating the Windows 11 taskbar Location Services (`Network Command Shell`) indicator flicker and background cursor flashes.
+  - Enforced `WS_EX_TOOLWINDOW` (stripping `WS_EX_APPWINDOW`) on frameless capsule and tray windows with work-area-clamped dynamic resizing.
+- **Hardened Drag Sliders & End-to-End Button Sync**:
+  - Expanded slider drag hitboxes across Hub, Media, Controls, and Settings Studio (`createRangeSlider`), protected active slider drags against background panel re-renders and accidental swipe gestures, synchronized factory defaults (`0.88` opacity, `2000ms` telemetry interval, `25` clipboard items), and added live `%`/timestamp readouts during dragging.
+  - Fixed the **Wi-Fi Flyout** (`ms-availablenetworks:`) URI handler, kept Clipboard search input focus intact across live filtering, preserved AI prompt drafts across updates, allowed pre-save update checks from Settings Studio, synchronized `Expand`/`Hide` sidebar controls & tray states cleanly, and surfaced actionable inline error notices.
 - **Custom Obsidian Glass Tray Menu & Full State Sync**:
   - Replaced the native Windows tray right-click menu with a lightweight frameless Obsidian Glass popover showing active Live Status, Now Playing strip, toggle switches for **Island Visible**, **Do Not Disturb**, and **Focus Mode**, quick **Expand / Collapse**, **Settings Studio**, and **Quit** — automatically positioned inside the active monitor work area whether opened from the taskbar or the Windows tray overflow flyout.
   - Real-time state synchronization (`pillvyn://island-state`, live appearance preview, startup Windows autostart sync, and clean disabling of background monitors/HUD overrides when a module is turned off).
@@ -67,9 +73,9 @@
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.2.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.3.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
 2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_1.2.0_x64-setup.exe.sha256`.
+3. Verify integrity (optional): compare against `PILLVYN_1.3.0_x64-setup.exe.sha256`.
 4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**

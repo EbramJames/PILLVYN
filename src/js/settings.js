@@ -78,7 +78,7 @@ let savedConfig = null;
 let config = null;
 let monitors = [];
 let plugins = null;
-let appVersion = '1.2.0';
+let appVersion = '1.3.0';
 let islandVisible = true;
 let islandExpanded = false;
 let activeSection = 'appearance';
@@ -162,6 +162,8 @@ function updateSidebarStatus() {
   const dot = document.getElementById('sidebar-status-dot');
   const text = document.getElementById('sidebar-status-text');
   const meta = document.getElementById('sidebar-status-meta');
+  const visBtn = document.getElementById('btn-toggle-island');
+  const expBtn = document.getElementById('btn-expand-island');
   if (dot) {
     dot.className = `status-dot ${islandVisible ? 'is-online' : 'is-hidden'}`;
   }
@@ -176,6 +178,12 @@ function updateSidebarStatus() {
     const count = monitors.length || 1;
     meta.textContent = `${count} ${count === 1 ? 'display' : 'displays'} detected`;
   }
+  if (visBtn) {
+    visBtn.textContent = islandVisible ? 'Hide Island' : 'Show Island';
+  }
+  if (expBtn) {
+    expBtn.textContent = islandExpanded ? 'Collapse' : 'Expand';
+  }
 }
 
 function updateLivePreviewBox() {
@@ -186,8 +194,10 @@ function updateLivePreviewBox() {
   if (!cap || !config?.appearance) return;
   const ap = config.appearance;
   const preset = getThemePreset(ap.theme);
+  const scale = Number(ap.scale || 1);
   applyAppearanceVars(ap, { themeTarget: cap, varTarget: cap, applyOpacity: true });
-  cap.style.width = `${Math.round((ap.compact_width || 268) * (ap.scale || 1))}px`;
+  cap.style.width = `${Math.round(ap.compact_width || 268)}px`;
+  cap.style.transform = `scale(${scale.toFixed(2)})`;
   if (titleEl) {
     titleEl.textContent = config.privacy?.dnd_mode
       ? 'Do Not Disturb'
@@ -199,7 +209,7 @@ function updateLivePreviewBox() {
     badgeEl.textContent = `${preset.name}`;
   }
   if (captionEl) {
-    captionEl.textContent = `Theme ${preset.name} · Accent ${normalizeHexColor(ap.accent_color).toUpperCase()} · Opacity ${Math.round((ap.opacity ?? 0.88) * 100)}% · Width ${ap.compact_width}px`;
+    captionEl.textContent = `Theme ${preset.name} · Accent ${normalizeHexColor(ap.accent_color).toUpperCase()} · Opacity ${Math.round((ap.opacity ?? 0.88) * 100)}% · Scale ${Math.round(scale * 100)}% · Width ${ap.compact_width}px`;
   }
 }
 
@@ -315,6 +325,15 @@ function renderNav() {
           activeSection = sec.id;
           renderNav();
           renderSection();
+          if (sec.id === 'behavior' && invoke) {
+            invoke('get_monitors').then((list) => {
+              if (Array.isArray(list)) {
+                monitors = list;
+                updateSidebarStatus();
+                if (activeSection === 'behavior') renderSection();
+              }
+            }).catch(() => {});
+          }
         },
       }, [iconWrap, el('span', { text: sec.label })])
     );
@@ -433,7 +452,7 @@ function renderAppearanceSection(container) {
         min: 0.45,
         max: 0.98,
         step: 0.01,
-        defaultValue: 0.90,
+        defaultValue: 0.88,
         format: (v) => `${Math.round(v * 100)}%`,
         onChange: (v) => {
           ap.opacity = Number(v.toFixed(2));
@@ -743,11 +762,11 @@ function renderModulesSection(container) {
       id: 'slider-hw-interval',
       title: 'Telemetry Refresh Interval',
       desc: 'Higher values reduce background CPU usage; battery mode doubles this automatically.',
-      value: Number(config.performance.hardware_interval_ms ?? 2500),
+      value: Number(config.performance.hardware_interval_ms ?? 2000),
       min: 1000,
       max: 10000,
       step: 500,
-      defaultValue: 2500,
+      defaultValue: 2000,
       format: (v) => `${(v / 1000).toFixed(1)}s`,
       onChange: (v) => {
         config.performance.hardware_interval_ms = Math.round(v);
@@ -817,14 +836,22 @@ function renderModulesSection(container) {
 }
 
 function buildComboFromKeyEvent(e) {
-  const ignoreOnly = ['Control', 'Shift', 'Alt', 'Meta', 'OS'];
+  const ignoreOnly = ['Control', 'Shift', 'Alt', 'Meta', 'OS', 'Tab'];
   if (ignoreOnly.includes(e.key)) return null;
   const parts = [];
   if (e.ctrlKey) parts.push('Ctrl');
   if (e.altKey) parts.push('Alt');
   if (e.shiftKey) parts.push('Shift');
   if (parts.length === 0) return null; // require at least one modifier for global hotkeys
-  let keyName = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  const specialKeys = {
+    ' ': 'Space',
+    '+': 'Plus',
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+  };
+  const keyName = specialKeys[e.key] || (e.key.length === 1 ? e.key.toUpperCase() : e.key);
   parts.push(keyName);
   return parts.join('+');
 }
@@ -1079,11 +1106,11 @@ function renderSystemSection(container) {
         id: 'slider-clipboard-max',
         title: 'Clipboard Item Limit',
         desc: 'Maximum number of recent copies retained in memory.',
-        value: Number(priv.clipboard_max_items ?? 35),
+        value: Number(priv.clipboard_max_items ?? 25),
         min: 5,
         max: 100,
         step: 5,
-        defaultValue: 35,
+        defaultValue: 25,
         format: (v) => `${Math.round(v)} items`,
         onChange: (v) => { priv.clipboard_max_items = Math.round(v); },
       }),
@@ -1142,7 +1169,10 @@ function renderSystemSection(container) {
               }
               updateBody.textContent = 'Checking GitHub Releases…';
               try {
-                updateResult = await invoke('check_updates');
+                updateResult = await invoke('check_updates', {
+                  consentOverride: Boolean(priv.update_check_consent),
+                  repoOverride: priv.update_repo || null,
+                });
                 renderSection();
               } catch (err) {
                 showBanner(`Update check failed: ${err}`, 'err');
@@ -1261,6 +1291,7 @@ async function handleResetDefaults() {
     savedConfig = structuredClone(outcome.config);
     setDirtyState(false);
     syncSettingsTheme();
+    updateSidebarStatus();
     renderSection();
     showBanner('All settings restored to factory defaults.', 'ok');
   } catch (err) {
@@ -1277,8 +1308,9 @@ async function init() {
     config = structuredClone(initPayload.config);
     monitors = initPayload.monitors || [];
     plugins = initPayload.plugins || null;
-    appVersion = initPayload.app_version || '1.2.0';
+    appVersion = initPayload.app_version || '1.3.0';
     islandVisible = initPayload.island_visible !== false;
+    islandExpanded = Boolean(initPayload.island_expanded);
 
     const verEl = document.getElementById('studio-version');
     if (verEl) verEl.textContent = `Studio · v${appVersion}`;

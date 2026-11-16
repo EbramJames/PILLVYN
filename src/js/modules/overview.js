@@ -1,4 +1,4 @@
-import { el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
+import { clampPercent, createRangeSlider, el, formatBytes, formatDuration, formatSpeed, icon } from '../utils.js';
 
 export function renderOverview(store, api) {
   const root = el('div', { class: 'stack' });
@@ -14,12 +14,12 @@ export function renderOverview(store, api) {
     ]);
     const playIcon = media.status === 'Playing' ? icon('pause', 14) : icon('play', 14);
     const controls = el('div', { style: { display: 'flex', gap: '4px', alignItems: 'center' } }, [
-      el('button', { class: 'icon-btn ghost', title: 'Previous', onClick: () => api.mediaControl('previous') }, icon('prev', 13)),
-      el('button', { class: 'icon-btn active', title: 'Play / Pause', onClick: () => api.mediaControl('play_pause') }, playIcon),
-      el('button', { class: 'icon-btn ghost', title: 'Next', onClick: () => api.mediaControl('next') }, icon('next', 13)),
+      el('button', { type: 'button', class: 'icon-btn ghost', title: 'Previous', disabled: media.can_previous === false, onClick: () => api.mediaControl('previous') }, icon('prev', 13)),
+      el('button', { type: 'button', class: 'icon-btn active', title: 'Play / Pause', disabled: media.can_play_pause === false, onClick: () => api.mediaControl('play_pause') }, playIcon),
+      el('button', { type: 'button', class: 'icon-btn ghost', title: 'Next', disabled: media.can_next === false, onClick: () => api.mediaControl('next') }, icon('next', 13)),
     ]);
 
-    const pct = media.duration_sec > 0 ? Math.min(100, (media.position_sec / media.duration_sec) * 100) : 0;
+    const pct = media.duration_sec > 0 ? clampPercent((media.position_sec / media.duration_sec) * 100) : 0;
     root.appendChild(
       el('div', { class: 'glass-card' }, [
         el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, [
@@ -37,7 +37,7 @@ export function renderOverview(store, api) {
     );
   } else if (activeTimer) {
     const pct = activeTimer.total_seconds > 0
-      ? Math.max(0, Math.min(100, (1 - activeTimer.remaining_seconds / activeTimer.total_seconds) * 100))
+      ? clampPercent((1 - activeTimer.remaining_seconds / activeTimer.total_seconds) * 100)
       : 0;
     root.appendChild(
       el('div', { class: 'glass-card' }, [
@@ -45,7 +45,7 @@ export function renderOverview(store, api) {
           el('span', { class: 'card-label', text: activeTimer.label }),
           el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
             el('span', { class: 'card-value', text: formatDuration(activeTimer.remaining_seconds) }),
-            el('button', { class: 'pill-btn', style: { padding: '2px 8px', fontSize: '10px' }, onClick: () => api.timerAction('toggle', activeTimer.id) }, 'Pause'),
+            el('button', { type: 'button', class: 'pill-btn', style: { padding: '2px 8px', fontSize: '10px' }, onClick: () => api.timerAction('toggle', activeTimer.id) }, 'Pause'),
           ]),
         ]),
         el('div', { class: 'meter-track', style: { height: '3px' } }, [
@@ -58,55 +58,64 @@ export function renderOverview(store, api) {
   // 2. Quick Audio & Brightness Controls (hide brightness card when display lacks DDC/CI or WMI)
   const sys = store.system;
   if (sys) {
-    const volPct = Math.round((sys.output_volume || 0) * 100);
-    const brightPct = sys.brightness ?? 0;
+    const volPct = Math.round(clampPercent((sys.output_volume || 0) * 100));
+    const brightPct = Math.round(clampPercent(sys.brightness ?? 0));
 
-    const volBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${volPct}%, rgba(255, 255, 255, 0.14) ${volPct}%)`;
-    const brightBg = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${brightPct}%, rgba(255, 255, 255, 0.14) ${brightPct}%)`;
+    const volReadout = el('span', { text: sys.output_muted ? 'Muted' : `${volPct}%` });
+    const volSlider = createRangeSlider({
+      value: volPct,
+      min: 0,
+      max: 100,
+      ariaLabel: 'Master Volume',
+      onDragState: (d) => api.setRangeDragging(d),
+      onInputValue: (v) => {
+        volReadout.textContent = sys.output_muted ? `Muted · ${Math.round(v)}%` : `${Math.round(v)}%`;
+        api.setVolume(false, v / 100, false);
+      },
+      onCommitValue: (v) => {
+        volReadout.textContent = sys.output_muted ? 'Muted' : `${Math.round(v)}%`;
+        api.setVolume(false, v / 100, true);
+      },
+    });
 
     const volCard = el('div', { class: 'glass-card' }, [
       el('div', { class: 'card-title-row' }, [
         el('span', { class: 'card-label', text: 'Volume' }),
         el('button', {
-          class: 'pill-btn',
+          type: 'button',
+          class: `pill-btn ${sys.output_muted ? 'danger' : ''}`,
           style: { padding: '1px 7px', fontSize: '10.5px' },
           onClick: () => api.setMute(false, !sys.output_muted),
-        }, [icon(sys.output_muted ? 'mute' : 'volume', 11), el('span', { text: sys.output_muted ? 'Muted' : `${volPct}%` })]),
+        }, [icon(sys.output_muted ? 'mute' : 'volume', 11), volReadout]),
       ]),
-      el('input', {
-        type: 'range',
-        class: 'range-slider',
-        min: '0',
-        max: '100',
-        value: String(volPct),
-        style: { background: volBg },
-        onInput: (e) => {
-          const v = Number(e.target.value);
-          e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
-          api.setVolume(false, v / 100);
-        },
-      }),
+      volSlider,
     ]);
 
     if (sys.brightness_supported) {
+      const brightReadout = el('span', { class: 'card-value', text: `${brightPct}%` });
+      const brightSlider = createRangeSlider({
+        value: brightPct,
+        min: 0,
+        max: 100,
+        ariaLabel: 'Display Brightness',
+        onDragState: (d) => api.setRangeDragging(d),
+        onInputValue: (v) => {
+          const rounded = Math.round(v);
+          brightReadout.textContent = `${rounded}%`;
+          api.setBrightness(rounded, false);
+        },
+        onCommitValue: (v) => {
+          const rounded = Math.round(v);
+          brightReadout.textContent = `${rounded}%`;
+          api.setBrightness(rounded, true);
+        },
+      });
       const brightCard = el('div', { class: 'glass-card' }, [
         el('div', { class: 'card-title-row' }, [
           el('span', { class: 'card-label', text: 'Brightness' }),
-          el('span', { class: 'card-value', text: `${brightPct}%` }),
+          brightReadout,
         ]),
-        el('input', {
-          type: 'range',
-          class: 'range-slider',
-          min: '0',
-          max: '100',
-          value: String(brightPct),
-          style: { background: brightBg },
-          onInput: (e) => {
-            const v = Number(e.target.value);
-            e.target.style.background = `linear-gradient(90deg, var(--accent) 0%, var(--accent) ${v}%, rgba(255, 255, 255, 0.14) ${v}%)`;
-          },
-          onChange: (e) => api.setBrightness(Number(e.target.value)),
-        }),
+        brightSlider,
       ]);
       root.appendChild(el('div', { class: 'grid-2' }, [volCard, brightCard]));
     } else {
@@ -122,13 +131,25 @@ export function renderOverview(store, api) {
   const hwEnabled = mods.hardware !== false;
   const netEnabled = mods.network !== false;
   const sysEnabled = mods.system !== false;
+  const makeNavCard = (enabled, tabId, children) => {
+    const attrs = { class: `glass-card ${enabled ? 'is-clickable' : ''}` };
+    if (enabled) {
+      attrs.role = 'button';
+      attrs.tabindex = '0';
+      attrs.onClick = () => api.switchTab(tabId);
+      attrs.onKeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          api.switchTab(tabId);
+        }
+      };
+    }
+    return el('div', attrs, children);
+  };
+
   root.appendChild(
     el('div', { class: 'grid-3' }, [
-      el('div', {
-        class: 'glass-card',
-        style: hwEnabled ? { cursor: 'pointer' } : {},
-        onClick: hwEnabled ? () => api.switchTab('hardware') : undefined,
-      }, [
+      makeNavCard(hwEnabled, 'hardware', [
         el('div', { class: 'card-label', text: 'CPU / RAM' }),
         el('div', {
           class: 'card-value',
@@ -140,11 +161,7 @@ export function renderOverview(store, api) {
           text: !hwEnabled ? 'Disabled in Settings' : (hw ? `${formatBytes(hw.ram_used_bytes)} RAM` : 'Hardware'),
         }),
       ]),
-      el('div', {
-        class: 'glass-card',
-        style: netEnabled ? { cursor: 'pointer' } : {},
-        onClick: netEnabled ? () => api.switchTab('network') : undefined,
-      }, [
+      makeNavCard(netEnabled, 'network', [
         el('div', { class: 'card-label', text: net?.vpn_active ? 'Network · VPN' : 'Network' }),
         el('div', {
           class: 'card-value',
@@ -156,11 +173,7 @@ export function renderOverview(store, api) {
           text: !netEnabled ? 'Disabled in Settings' : (net?.ping_ms != null ? `Ping ${net.ping_ms} ms` : (net?.adapter_name || 'Adapter')),
         }),
       ]),
-      el('div', {
-        class: 'glass-card',
-        style: sysEnabled ? { cursor: 'pointer' } : {},
-        onClick: sysEnabled ? () => api.switchTab('system') : undefined,
-      }, [
+      makeNavCard(sysEnabled, 'system', [
         el('div', { class: 'card-label', text: 'Power' }),
         el('div', {
           class: 'card-value',
@@ -182,7 +195,7 @@ export function renderOverview(store, api) {
   if (actions.length > 0) {
     root.appendChild(
       el('div', { class: 'grid-3' }, actions.map((item) =>
-        el('button', { class: 'action-tile', onClick: () => api.runQuickAction(item) }, [
+        el('button', { type: 'button', class: 'action-tile', onClick: () => api.runQuickAction(item) }, [
           icon(item.icon || 'zap', 15),
           el('span', { style: { fontSize: '11.5px', fontWeight: '600' }, text: item.label }),
         ])

@@ -357,6 +357,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .card-heading {
@@ -428,7 +429,7 @@ button {
 /* Live Preview Card */
 .preview-stage {
   border-radius: 14px;
-  padding: 14px 16px 12px;
+  padding: 18px 16px 14px;
   background:
     radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
     linear-gradient(135deg, rgba(28, 36, 54, 0.55) 0%, rgba(11, 14, 22, 0.85) 100%);
@@ -437,7 +438,9 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 9px;
+  gap: 14px;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .preview-capsule {
@@ -675,7 +678,8 @@ button {
   font-size: 10.5px;
   color: var(--text-4);
   font-variant-numeric: tabular-nums;
-  min-width: 34px;
+  min-width: 48px;
+  white-space: nowrap;
 }
 
 .slider-bound.is-max {
@@ -686,6 +690,17 @@ input[type='range'].pro-slider {
   -webkit-appearance: none;
   appearance: none;
   flex: 1;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+  touch-action: none;
+}
+
+input[type='range'].pro-slider::-webkit-slider-runnable-track {
+  width: 100%;
   height: 6px;
   border-radius: 999px;
   background: linear-gradient(
@@ -694,8 +709,6 @@ input[type='range'].pro-slider {
     var(--accent) var(--range-pct, 50%),
     rgba(255, 255, 255, 0.14) var(--range-pct, 50%)
   );
-  outline: none;
-  cursor: pointer;
 }
 
 input[type='range'].pro-slider::-webkit-slider-thumb {
@@ -703,6 +716,7 @@ input[type='range'].pro-slider::-webkit-slider-thumb {
   appearance: none;
   width: 16px;
   height: 16px;
+  margin-top: -5px;
   border-radius: 50%;
   background: #ffffff;
   border: 2.5px solid var(--accent);
@@ -710,7 +724,8 @@ input[type='range'].pro-slider::-webkit-slider-thumb {
   transition: transform 110ms ease, box-shadow 110ms ease;
 }
 
-input[type='range'].pro-slider::-webkit-slider-thumb:hover {
+input[type='range'].pro-slider::-webkit-slider-thumb:hover,
+input[type='range'].pro-slider:active::-webkit-slider-thumb {
   transform: scale(1.12);
   box-shadow: 0 0 0 4px var(--accent-soft), 0 2px 10px rgba(0, 0, 0, 0.5);
 }

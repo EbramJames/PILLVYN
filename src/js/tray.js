@@ -2,8 +2,6 @@ import { applyAppearanceVars } from './theme.js';
 
 const { invoke } = window.__TAURI__?.core || {};
 const { listen } = window.__TAURI__?.event || {};
-const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
-const LogicalSize = window.__TAURI__?.dpi?.LogicalSize;
 
 const TRAY_ICONS = {
   eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.8"/></svg>`,
@@ -15,6 +13,8 @@ const TRAY_ICONS = {
   power: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>`,
 };
 
+let lastAppliedHeight = 0;
+
 function hydrateIcons() {
   document.querySelectorAll('.tray-icon[data-icon]').forEach((el) => {
     const key = el.dataset.icon;
@@ -22,11 +22,14 @@ function hydrateIcons() {
   });
 }
 
-function fitWindowHeight() {
+function fitWindowHeight(force = false) {
   const root = document.getElementById('tray-root');
-  if (!root || !currentWindow || !LogicalSize) return;
+  if (!root || !invoke) return;
+  if (document.hidden && !force) return;
   const h = Math.max(260, Math.min(440, Math.ceil(root.getBoundingClientRect().height)));
-  currentWindow.setSize(new LogicalSize(262, h)).catch(() => {});
+  if (!force && Math.abs(h - lastAppliedHeight) < 2) return;
+  lastAppliedHeight = h;
+  invoke('resize_tray_window', { height: h }).catch(() => {});
 }
 
 function renderTrayState(snap) {
@@ -116,14 +119,17 @@ function renderTrayState(snap) {
     focusSwitch.classList.toggle('is-on', Boolean(snap.focus_mode));
   }
 
-  requestAnimationFrame(fitWindowHeight);
+  requestAnimationFrame(() => fitWindowHeight(false));
 }
 
-async function refreshTrayState() {
+async function refreshTrayState(forceResize = false) {
   if (!invoke) return;
   try {
     const snap = await invoke('get_tray_state');
     renderTrayState(snap);
+    if (forceResize) {
+      requestAnimationFrame(() => fitWindowHeight(true));
+    }
   } catch (err) {
     console.error('Failed to load tray state:', err);
   }
@@ -158,15 +164,21 @@ function wireTrayEvents() {
       e.preventDefault();
       const prev = items[(currentIdx - 1 + items.length) % items.length];
       prev?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1]?.focus();
     }
   });
 
   if (listen) {
-    listen('pillvyn://tray-refresh', refreshTrayState);
-    listen('pillvyn://config', refreshTrayState);
-    listen('pillvyn://island-state', refreshTrayState);
-    listen('pillvyn://media', refreshTrayState);
-    listen('pillvyn://activities', refreshTrayState);
+    listen('pillvyn://tray-refresh', () => refreshTrayState(true));
+    listen('pillvyn://config', () => refreshTrayState(false));
+    listen('pillvyn://island-state', () => refreshTrayState(false));
+    listen('pillvyn://media', () => refreshTrayState(false));
+    listen('pillvyn://activities', () => refreshTrayState(false));
   }
 }
 
