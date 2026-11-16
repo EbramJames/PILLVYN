@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadItem {
@@ -40,6 +41,8 @@ pub struct DownloadMonitor {
     downloads_dir: Option<PathBuf>,
     tracked: HashMap<String, TrackedState>,
     recent_completed: Vec<DownloadItem>,
+    steam_dirs_cache: Vec<PathBuf>,
+    last_steam_dir_scan: Option<Instant>,
 }
 
 impl Default for DownloadMonitor {
@@ -55,7 +58,20 @@ impl DownloadMonitor {
             downloads_dir,
             tracked: HashMap::new(),
             recent_completed: Vec::new(),
+            steam_dirs_cache: Vec::new(),
+            last_steam_dir_scan: None,
         }
+    }
+
+    fn cached_steam_library_folders(&mut self) -> Vec<PathBuf> {
+        let stale = self
+            .last_steam_dir_scan
+            .is_none_or(|t| t.elapsed().as_secs() >= 30);
+        if stale {
+            self.steam_dirs_cache = find_steam_library_folders();
+            self.last_steam_dir_scan = Some(Instant::now());
+        }
+        self.steam_dirs_cache.clone()
     }
 
     pub fn collect(&mut self) -> DownloadsSnapshot {
@@ -123,8 +139,8 @@ impl DownloadMonitor {
             }
         }
 
-        // 2. Scan Steam appmanifest_*.acf for active Steam game downloads
-        let steam_dirs = find_steam_library_folders();
+        // 2. Scan Steam appmanifest_*.acf for active Steam game downloads (30s directory scan TTL)
+        let steam_dirs = self.cached_steam_library_folders();
         if !steam_dirs.is_empty() {
             watched_sources.push("Steam Libraries".to_string());
         }

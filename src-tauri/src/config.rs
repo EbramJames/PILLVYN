@@ -21,6 +21,12 @@ pub struct PillvynConfig {
     pub quick_actions: Vec<QuickActionItem>,
     pub profiles: Vec<AppProfile>,
     pub autostart: bool,
+    #[serde(default = "default_false")]
+    pub autostart_initialized: bool,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,7 +268,8 @@ impl Default for PillvynConfig {
             ai: AiConfig::default(),
             quick_actions: default_quick_actions(),
             profiles: default_profiles(),
-            autostart: false,
+            autostart: true,
+            autostart_initialized: true,
         }
     }
 }
@@ -427,13 +434,18 @@ pub fn load_config() -> PillvynConfig {
         },
         Err(_) => (PillvynConfig::default(), false),
     };
-    let needs_migration = loaded_from_disk
+    let mut needs_migration = loaded_from_disk
         && (cfg.version < 2
             || cfg
                 .privacy
                 .update_repo
                 .trim()
                 .eq_ignore_ascii_case("pillvyn/pillvyn"));
+    if loaded_from_disk && !cfg.autostart_initialized {
+        cfg.autostart = true;
+        cfg.autostart_initialized = true;
+        needs_migration = true;
+    }
     cfg.sanitize();
     if needs_migration {
         let _ = save_config(&cfg);
@@ -503,5 +515,25 @@ mod tests {
         assert!(cfg.appearance.hover_peek);
         assert!(cfg.appearance.click_outside_dismiss);
         assert!(cfg.appearance.show_volume_hud);
+        assert!(!cfg.autostart_initialized);
+    }
+
+    #[test]
+    fn autostart_defaults_on_and_preserves_explicit_opt_out() {
+        let fresh = PillvynConfig::default();
+        assert!(fresh.autostart);
+        assert!(fresh.autostart_initialized);
+
+        // Simulated upgrade from <= v1.4.0 config missing `autostart_initialized`
+        let old_json = r#"{"version":2,"autostart":false}"#;
+        let parsed_old: PillvynConfig = serde_json::from_str(old_json).expect("valid v1.4 json");
+        assert!(!parsed_old.autostart_initialized);
+
+        // User who explicitly toggled startup OFF retains their preference across reloads
+        let opt_out_json = r#"{"version":2,"autostart":false,"autostart_initialized":true}"#;
+        let parsed_opt_out: PillvynConfig =
+            serde_json::from_str(opt_out_json).expect("valid opt-out json");
+        assert!(!parsed_opt_out.autostart);
+        assert!(parsed_opt_out.autostart_initialized);
     }
 }

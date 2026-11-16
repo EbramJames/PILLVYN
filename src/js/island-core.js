@@ -75,23 +75,23 @@ export function renderCompactAndMinimized(store, api) {
   const miniDot = document.getElementById('mini-dot');
   const miniTime = document.getElementById('mini-time');
   const miniLabel = document.getElementById('mini-label');
-  miniTime.textContent = nowStr;
-  miniDot.className = 'mini-dot' + (dnd ? ' dnd' : media?.status === 'Playing' ? ' playing' : '');
-  miniLabel.textContent = dnd
+  if (miniTime.textContent !== nowStr) miniTime.textContent = nowStr;
+  const miniDotCls = 'mini-dot' + (dnd ? ' dnd' : media?.status === 'Playing' ? ' playing' : '');
+  if (miniDot.className !== miniDotCls) miniDot.className = miniDotCls;
+  const miniLabelText = dnd
     ? 'DND'
     : (topAct && topAct.kind !== 'media' ? (topAct.badge || '') : '');
+  if (miniLabel.textContent !== miniLabelText) miniLabel.textContent = miniLabelText;
 
   // Header clock + active profile pill
   const hdrClock = document.getElementById('header-clock');
-  if (hdrClock) hdrClock.textContent = nowStr;
+  if (hdrClock && hdrClock.textContent !== nowStr) hdrClock.textContent = nowStr;
   const hdrProfile = document.getElementById('header-profile');
   if (hdrProfile) {
-    if (store.activeProfile?.name) {
-      hdrProfile.textContent = store.activeProfile.name;
-      hdrProfile.style.display = 'inline-block';
-    } else {
-      hdrProfile.style.display = 'none';
-    }
+    const profName = store.activeProfile?.name || '';
+    if (hdrProfile.textContent !== profName) hdrProfile.textContent = profName;
+    const profDisplay = profName ? 'inline-block' : 'none';
+    if (hdrProfile.style.display !== profDisplay) hdrProfile.style.display = profDisplay;
   }
 
   // Compact capsule
@@ -105,12 +105,10 @@ export function renderCompactAndMinimized(store, api) {
   const progEl = document.getElementById('compact-progress');
   const progFillEl = document.getElementById('compact-progress-fill');
 
-  clear(artWrap);
+  let nextArtKey = 'brand';
   if (media?.active && media.thumbnail_data_url && (!topAct || topAct.kind === 'media')) {
-    artWrap.classList.add('round');
-    artWrap.appendChild(el('img', { src: media.thumbnail_data_url, alt: media.title || 'Cover' }));
+    nextArtKey = `thumb:${media.thumbnail_data_url}`;
   } else if (topAct && topAct.kind !== 'media') {
-    artWrap.classList.remove('round');
     const iconName = topAct.kind === 'download'
       ? 'download'
       : topAct.kind === 'timer'
@@ -122,90 +120,111 @@ export function renderCompactAndMinimized(store, api) {
             : topAct.kind === 'system_hud'
               ? (topAct.title === 'Muted' ? 'mute' : topAct.title === 'Brightness' ? 'sun' : 'volume')
               : 'layers';
-    artWrap.appendChild(icon(iconName, 13));
+    nextArtKey = `ico:${iconName}`;
   } else if (media?.active) {
-    artWrap.classList.remove('round');
-    artWrap.appendChild(icon('music', 13));
-  } else {
-    artWrap.classList.remove('round');
-    artWrap.appendChild(el('img', { src: 'assets/icon.png', alt: 'PILLVYN' }));
+    nextArtKey = 'ico:music';
   }
 
+  if (artWrap.dataset.artKey !== nextArtKey) {
+    artWrap.dataset.artKey = nextArtKey;
+    clear(artWrap);
+    if (nextArtKey.startsWith('thumb:')) {
+      artWrap.classList.add('round');
+      artWrap.appendChild(el('img', { src: media.thumbnail_data_url, alt: media.title || 'Cover' }));
+    } else if (nextArtKey.startsWith('ico:')) {
+      artWrap.classList.remove('round');
+      artWrap.appendChild(icon(nextArtKey.slice(4), 13));
+    } else {
+      artWrap.classList.remove('round');
+      artWrap.appendChild(el('img', { src: 'assets/icon.png', alt: 'PILLVYN' }));
+    }
+  }
+
+  let nextTitle = '';
+  let nextSub = '';
   if (topAct && topAct.kind !== 'media') {
-    titleEl.textContent = topAct.title;
-    subEl.textContent = topAct.subtitle || '';
+    nextTitle = topAct.title;
+    nextSub = topAct.subtitle || '';
   } else if (media?.active) {
-    titleEl.textContent = media.title || 'Now Playing';
-    subEl.textContent = media.artist || media.source_app || '';
+    nextTitle = media.title || 'Now Playing';
+    nextSub = media.artist || media.source_app || '';
   } else if (store.gaming?.active) {
-    titleEl.textContent = store.gaming.game_title || 'Gaming Focus';
-    subEl.textContent = store.gaming.notifications_suppressed ? 'Notifications Muted' : 'Game Mode';
+    nextTitle = store.gaming.game_title || 'Gaming Focus';
+    nextSub = store.gaming.notifications_suppressed ? 'Notifications Muted' : 'Game Mode';
   } else {
-    titleEl.textContent = store.activeProfile?.name || 'PILLVYN';
+    nextTitle = store.activeProfile?.name || 'PILLVYN';
     if (!minimalIdle) {
       const hw = store.hardware;
       const net = store.network;
       if (hw && net?.connected) {
-        subEl.textContent = `CPU ${Math.round(hw.cpu_usage_percent)}% · ↓ ${formatSpeed(net.download_bps)}`;
+        nextSub = `CPU ${Math.round(hw.cpu_usage_percent)}% · ↓ ${formatSpeed(net.download_bps)}`;
       } else if (hw) {
-        subEl.textContent = `CPU ${Math.round(hw.cpu_usage_percent)}% · RAM ${Math.round(hw.ram_percent)}%`;
-      } else {
-        subEl.textContent = '';
+        nextSub = `CPU ${Math.round(hw.cpu_usage_percent)}% · RAM ${Math.round(hw.ram_percent)}%`;
       }
     } else {
-      subEl.textContent = dnd ? 'Do Not Disturb' : '';
+      nextSub = dnd ? 'Do Not Disturb' : '';
     }
   }
+  if (titleEl.textContent !== nextTitle) titleEl.textContent = nextTitle;
+  if (subEl.textContent !== nextSub) subEl.textContent = nextSub;
 
   const isPlaying = media?.status === 'Playing';
   eqEl.classList.toggle('active', isPlaying);
-  eqEl.style.display = isPlaying ? 'flex' : 'none';
+  const eqDisplay = isPlaying ? 'flex' : 'none';
+  if (eqEl.style.display !== eqDisplay) eqEl.style.display = eqDisplay;
 
-  // Hover-to-Peek inline playback controls on Compact pill
+  // Hover-to-Peek inline playback controls on Compact pill (rebuild only on capability/state changes)
   const canPeek = hoverPeek && Boolean(media?.active) && (!topAct || topAct.kind === 'media');
   compactView.classList.toggle('peek-ready', canPeek);
-  clear(peekEl);
-  if (canPeek && api) {
-    const mkPeekBtn = (iconName, title, disabled, actionName) => {
-      const btn = el(
-        'button',
-        {
-          type: 'button',
-          class: 'peek-btn',
-          title,
-          disabled: Boolean(disabled),
-          onClick: (e) => {
-            e.stopPropagation();
-            if (!disabled) api.mediaControl(actionName);
+  const peekKey = canPeek && api
+    ? `${isPlaying ? 1 : 0}:${media.can_previous === false ? 0 : 1}:${media.can_play_pause === false ? 0 : 1}:${media.can_next === false ? 0 : 1}`
+    : 'off';
+  if (peekEl.dataset.peekKey !== peekKey) {
+    peekEl.dataset.peekKey = peekKey;
+    clear(peekEl);
+    if (canPeek && api) {
+      const mkPeekBtn = (iconName, title, disabled, actionName) => {
+        const btn = el(
+          'button',
+          {
+            type: 'button',
+            class: 'peek-btn',
+            title,
+            disabled: Boolean(disabled),
+            onClick: (e) => {
+              e.stopPropagation();
+              if (!disabled) api.mediaControl(actionName);
+            },
           },
-        },
-        icon(iconName, 11)
+          icon(iconName, 11)
+        );
+        btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+        return btn;
+      };
+      peekEl.appendChild(mkPeekBtn('prev', 'Previous Track', media.can_previous === false, 'previous'));
+      peekEl.appendChild(
+        mkPeekBtn(
+          isPlaying ? 'pause' : 'play',
+          isPlaying ? 'Pause' : 'Play',
+          media.can_play_pause === false,
+          'play_pause'
+        )
       );
-      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
-      return btn;
-    };
-    peekEl.appendChild(mkPeekBtn('prev', 'Previous Track', media.can_previous === false, 'previous'));
-    peekEl.appendChild(
-      mkPeekBtn(
-        isPlaying ? 'pause' : 'play',
-        isPlaying ? 'Pause' : 'Play',
-        media.can_play_pause === false,
-        'play_pause'
-      )
-    );
-    peekEl.appendChild(mkPeekBtn('next', 'Next Track', media.can_next === false, 'next'));
+      peekEl.appendChild(mkPeekBtn('next', 'Next Track', media.can_next === false, 'next'));
+    }
   }
 
+  let nextChip = nowStr;
+  let nextChipCls = 'compact-chip';
   if (topAct?.badge && topAct.kind !== 'media') {
-    chipEl.textContent = topAct.badge;
-    chipEl.className = 'compact-chip accent';
+    nextChip = topAct.badge;
+    nextChipCls = 'compact-chip accent';
   } else if (dnd) {
-    chipEl.textContent = 'DND';
-    chipEl.className = 'compact-chip accent';
-  } else {
-    chipEl.textContent = nowStr;
-    chipEl.className = 'compact-chip';
+    nextChip = 'DND';
+    nextChipCls = 'compact-chip accent';
   }
+  if (chipEl.textContent !== nextChip) chipEl.textContent = nextChip;
+  if (chipEl.className !== nextChipCls) chipEl.className = nextChipCls;
 
   // Subtle hairline bottom progress indicator on Compact pill
   let pct = null;
@@ -216,14 +235,18 @@ export function renderCompactAndMinimized(store, api) {
   }
   progEl.classList.toggle('visible', pct != null);
   if (pct != null) {
-    progFillEl.style.width = `${pct.toFixed(1)}%`;
+    const nextWidth = `${pct.toFixed(1)}%`;
+    if (progFillEl.style.width !== nextWidth) progFillEl.style.width = nextWidth;
   }
 }
 
 export function renderActivitiesStrip(store, onPickActivity) {
   const strip = document.getElementById('activities-strip');
-  clear(strip);
   const items = store.activities || [];
+  const stripKey = items.map((a) => `${a.id}|${a.badge || ''}|${a.title}|${a.subtitle || ''}`).join(';');
+  if (strip.dataset.stripKey === stripKey) return;
+  strip.dataset.stripKey = stripKey;
+  clear(strip);
   if (items.length === 0) return;
 
   for (const act of items) {
@@ -242,12 +265,15 @@ export function renderActivitiesStrip(store, onPickActivity) {
 
 export function renderNavTabs(store, onSelectTab) {
   const nav = document.getElementById('module-nav');
-  clear(nav);
   const unread = store.notifications?.unread_count || 0;
   const dlActive = store.downloads?.active_count || 0;
+  const visibleTabs = MODULE_TABS.filter((tab) => isTabEnabled(tab, store.config));
+  const navKey = `${store.activeTab}|${unread}|${dlActive}|${visibleTabs.map((t) => t.id).join(',')}`;
+  if (nav.dataset.navKey === navKey) return;
+  nav.dataset.navKey = navKey;
 
-  for (const tab of MODULE_TABS) {
-    if (!isTabEnabled(tab, store.config)) continue;
+  clear(nav);
+  for (const tab of visibleTabs) {
     const isActive = store.activeTab === tab.id;
     let badgeCount = 0;
     if (tab.id === 'notifications') badgeCount = unread;

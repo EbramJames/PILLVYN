@@ -21,7 +21,23 @@ function collectFiles(dir, extFilter) {
   return results;
 }
 
-const required = ['index.html', 'settings.html', 'tray.html', 'styles/tokens.css', 'styles/island.css', 'styles/tray.css', 'js/main.js', 'js/tray.js', 'js/theme.js'];
+const required = [
+  'index.html',
+  'settings.html',
+  'tray.html',
+  'styles/tokens.css',
+  'styles/island.css',
+  'styles/modules.css',
+  'styles/settings.css',
+  'styles/tray.css',
+  'js/main.js',
+  'js/tray.js',
+  'js/theme.js',
+  'assets/fonts/inter-latin-wght-normal.woff2',
+  'assets/fonts/inter-latin-ext-wght-normal.woff2',
+  'assets/fonts/inter-cyrillic-wght-normal.woff2',
+  'assets/fonts/jetbrains-mono-latin-wght-normal.woff2',
+];
 for (const rel of required) {
   const full = path.join(srcDir, rel);
   if (!fs.existsSync(full)) {

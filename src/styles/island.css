@@ -26,6 +26,7 @@
   -webkit-backdrop-filter: blur(26px) saturate(145%);
   transform: scale(var(--island-scale));
   transform-origin: top center;
+  will-change: transform, width, min-height;
   overflow: hidden;
   transition:
     width 340ms var(--spring),
@@ -677,6 +678,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
+  contain: layout style;
 }
 
 .module-panel::-webkit-scrollbar {

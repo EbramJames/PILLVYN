@@ -25,7 +25,7 @@ export const store = {
   weather: null,
   plugins: null,
   activeProfile: null,
-  appVersion: '1.4.0',
+  appVersion: '1.5.0',
   rangeDragging: false,
   seekingUntil: 0,
   weatherLoading: false,

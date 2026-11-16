@@ -184,12 +184,12 @@ pub(crate) fn handle_hotkey_action(app: &AppHandle, action: &str) {
                         if let Ok(mut ts) = state.last_expanded_ms.lock() {
                             *ts = now_ms();
                         }
+                        state.telemetry_notify.notify_one();
                     } else if let Ok(mut pinned) = state.island_pinned.lock() {
                         *pinned = false;
                     }
-                    if let Ok(cfg) = state.config.lock() {
-                        let _ = apply_window_geometry(&w, &cfg);
-                    }
+                    let cfg = crate::commands::effective_island_config(&state);
+                    let _ = apply_window_geometry(&w, &cfg);
                 }
                 if !w.is_visible().unwrap_or(false) {
                     let _ = w.show();
@@ -366,6 +366,7 @@ pub fn run() {
     let media_notify = Arc::new(Notify::new());
     let system_notify = Arc::new(Notify::new());
     let foreground_notify = Arc::new(Notify::new());
+    let telemetry_notify = Arc::new(Notify::new());
 
     let app_state = AppState {
         config: Mutex::new(initial_cfg.clone()),
@@ -400,6 +401,7 @@ pub fn run() {
         media_notify,
         system_notify,
         foreground_notify,
+        telemetry_notify,
     };
 
     tauri::Builder::default()
@@ -428,10 +430,14 @@ pub fn run() {
             let state = handle.state::<AppState>();
 
             if let Ok(actual_autostart) = handle.autolaunch().is_enabled() {
-                if let Ok(mut cfg) = state.config.lock() {
-                    if cfg.autostart != actual_autostart {
-                        cfg.autostart = actual_autostart;
-                        let _ = save_config(&cfg);
+                let wanted = state.config.lock().map(|c| c.autostart).unwrap_or(true);
+                if wanted && !actual_autostart {
+                    if let Err(err) = handle.autolaunch().enable() {
+                        warn!("Could not enable Windows startup: {err}");
+                    }
+                } else if !wanted && actual_autostart {
+                    if let Err(err) = handle.autolaunch().disable() {
+                        warn!("Could not disable Windows startup: {err}");
                     }
                 }
             }
@@ -745,12 +751,13 @@ fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
 }
 
 fn spawn_background_services(app: AppHandle) {
-    let (media_notify, system_notify, fg_notify) = {
+    let (media_notify, system_notify, fg_notify, telemetry_notify) = {
         let st = app.state::<AppState>();
         (
             Arc::clone(&st.media_notify),
             Arc::clone(&st.system_notify),
             Arc::clone(&st.foreground_notify),
+            Arc::clone(&st.telemetry_notify),
         )
     };
 
@@ -1111,11 +1118,14 @@ fn spawn_background_services(app: AppHandle) {
 
     // 4. Adaptive Telemetry loop: Hardware, Gaming, Downloads, Network
     let app_slow = app.clone();
+    let telemetry_wake = Arc::clone(&telemetry_notify);
     tauri::async_runtime::spawn(async move {
         let mut hw_collector = HardwareCollector::new();
         let mut gaming_mon = GamingMonitor::new();
         let mut dl_mon = DownloadMonitor::new();
         let mut net_mon = NetworkMonitor::new();
+        let mut telemetry_cycle: u64 = 0;
+        let mut force_refresh = true;
 
         // Prime initial weather in its own async task so first telemetry ticks run immediately
         let app_weather = app_slow.clone();
@@ -1140,19 +1150,27 @@ fn spawn_background_services(app: AppHandle) {
         });
 
         loop {
-            let (cfg, on_battery_low_power) = {
+            let (cfg, on_battery_low_power, expanded, visible) = {
                 let st = app_slow.state::<AppState>();
                 let cfg = st.config.lock().map(|c| c.clone()).unwrap_or_default();
+                let exp = st.island_expanded.lock().map(|g| *g).unwrap_or(false);
+                let vis = st.window_state.lock().map(|w| w.is_visible).unwrap_or(true);
                 let bat_low = cfg.performance.low_power_on_battery
                     && st
                         .latest_system
                         .lock()
                         .ok()
                         .is_some_and(|s| s.battery.present && !s.battery.ac_online);
-                (cfg, bat_low)
+                (cfg, bat_low, exp, vis)
             };
 
-            if cfg.modules.hardware || cfg.modules.gaming {
+            let collect_heavy = force_refresh
+                || expanded
+                || !cfg.appearance.minimal_idle
+                || (telemetry_cycle % 3 == 0);
+            force_refresh = false;
+
+            if collect_heavy && (cfg.modules.hardware || cfg.modules.gaming) {
                 let (hw_snap, next_hw) = tokio::task::spawn_blocking(move || {
                     let s = hw_collector.collect();
                     (s, hw_collector)
@@ -1186,7 +1204,7 @@ fn spawn_background_services(app: AppHandle) {
                     ws.force_click_through = gm_snap.active && cfg.gaming.click_through_hud;
                 }
                 if let Ok(mut act) = st.activities.lock() {
-                    if gm_snap.active {
+                    let changed = if gm_snap.active {
                         let title = gm_snap
                             .game_title
                             .clone()
@@ -1213,11 +1231,13 @@ fn spawn_background_services(app: AppHandle) {
                             priority: 72,
                             updated_at_ms: now_ms(),
                             expires_at_ms: None,
-                        });
+                        })
                     } else {
-                        act.remove("gaming");
+                        act.remove("gaming")
+                    };
+                    if changed {
+                        let _ = app_slow.emit("pillvyn://activities", act.snapshot());
                     }
-                    let _ = app_slow.emit("pillvyn://activities", act.snapshot());
                 }
 
                 let _ = app_slow.emit("pillvyn://gaming", gm_snap);
@@ -1247,7 +1267,7 @@ fn spawn_background_services(app: AppHandle) {
                     *g = dl_snap.clone();
                 }
                 if let Ok(mut act) = st.activities.lock() {
-                    if let Some(first_active) =
+                    let changed = if let Some(first_active) =
                         dl_snap.items.iter().find(|d| d.status == "downloading")
                     {
                         act.upsert(LiveActivity {
@@ -1271,11 +1291,13 @@ fn spawn_background_services(app: AppHandle) {
                             priority: 78,
                             updated_at_ms: now_ms(),
                             expires_at_ms: None,
-                        });
+                        })
                     } else {
-                        act.remove("download");
+                        act.remove("download")
+                    };
+                    if changed {
+                        let _ = app_slow.emit("pillvyn://activities", act.snapshot());
                     }
-                    let _ = app_slow.emit("pillvyn://activities", act.snapshot());
                 }
                 let _ = app_slow.emit("pillvyn://downloads", dl_snap);
             } else {
@@ -1287,7 +1309,7 @@ fn spawn_background_services(app: AppHandle) {
                 };
             }
 
-            if cfg.modules.network {
+            if collect_heavy && cfg.modules.network {
                 let (net_snap, next_net) = tokio::task::spawn_blocking(move || {
                     let s = net_mon.collect();
                     (s, net_mon)
@@ -1303,13 +1325,28 @@ fn spawn_background_services(app: AppHandle) {
                 let _ = app_slow.emit("pillvyn://network", net_snap);
             }
 
+            telemetry_cycle = telemetry_cycle.wrapping_add(1);
             let base_ms = cfg.performance.hardware_interval_ms.max(1200);
-            let interval = if on_battery_low_power {
-                base_ms.saturating_mul(2)
+            let target_ms = if !visible {
+                base_ms.max(8000)
+            } else if !expanded && cfg.appearance.minimal_idle {
+                base_ms.max(3500)
             } else {
                 base_ms
             };
-            tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
+            let interval = if on_battery_low_power {
+                target_ms.saturating_mul(2)
+            } else {
+                target_ms
+            };
+
+            tokio::select! {
+                _ = telemetry_wake.notified() => {
+                    force_refresh = true;
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(interval)) => {}
+            }
         }
     });
 }

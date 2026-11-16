@@ -9,7 +9,7 @@ labels: ["bug"]
 Describe the problem clearly and concisely.
 
 ### Environment
-- **PILLVYN Version:** (e.g. `1.4.0`)
+- **PILLVYN Version:** (e.g. `1.5.0`)
 - **Windows Edition & Build:** (e.g. `Windows 11 Pro 24H2`)
 - **Display Setup:** (Resolution, DPI scaling %, single/multi-monitor)
 - **GPU / Audio Hardware:** (Optional, if relevant)

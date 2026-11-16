@@ -1,6 +1,6 @@
 use nvml_wrapper::Nvml;
 use serde::{Deserialize, Serialize};
-use sysinfo::{Components, Disks, System};
+use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiskSnapshot {
@@ -43,6 +43,9 @@ pub struct HardwareCollector {
     nvml: Option<Nvml>,
     #[cfg(target_os = "windows")]
     pdh_gpu: Option<PdhGpuCounter>,
+    #[cfg(target_os = "windows")]
+    dxgi_adapters: Vec<(String, u64)>,
+    sample_count: u64,
 }
 
 impl Default for HardwareCollector {
@@ -53,7 +56,11 @@ impl Default for HardwareCollector {
 
 impl HardwareCollector {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
+        let mut sys = System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        );
         sys.refresh_cpu_usage();
         sys.refresh_memory();
         let disks = Disks::new_with_refreshed_list();
@@ -61,6 +68,8 @@ impl HardwareCollector {
         let nvml = Nvml::init().ok();
         #[cfg(target_os = "windows")]
         let pdh_gpu = PdhGpuCounter::new();
+        #[cfg(target_os = "windows")]
+        let dxgi_adapters = enumerate_dxgi_adapters();
 
         Self {
             sys,
@@ -69,14 +78,19 @@ impl HardwareCollector {
             nvml,
             #[cfg(target_os = "windows")]
             pdh_gpu,
+            #[cfg(target_os = "windows")]
+            dxgi_adapters,
+            sample_count: 0,
         }
     }
 
     pub fn collect(&mut self) -> HardwareSnapshot {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
-        self.disks.refresh(true);
-        self.components.refresh(true);
+        let full_enum = self.sample_count % 6 == 0;
+        self.disks.refresh(full_enum);
+        self.components.refresh(full_enum);
+        self.sample_count = self.sample_count.wrapping_add(1);
 
         let cpus = self.sys.cpus();
         let cpu_brand = cpus
@@ -173,29 +187,27 @@ impl HardwareCollector {
             }
         }
 
-        // 2. Supplement or fallback with DXGI adapter enumeration + Windows PDH GPU Utilization
+        // 2. Supplement or fallback with cached DXGI adapters + Windows PDH GPU Utilization
         #[cfg(target_os = "windows")]
         {
-            let pdh_util = self.pdh_gpu.as_mut().and_then(|p| p.sample());
-            let dxgi_adapters = enumerate_dxgi_adapters();
-            for (name, total_vram_mb) in dxgi_adapters {
+            let mut pdh_util: Option<Option<u32>> = None;
+            for (name, total_vram_mb) in &self.dxgi_adapters {
+                let name_lower = name.to_ascii_lowercase();
                 let already_listed = gpus.iter().any(|g| {
-                    g.name
-                        .to_ascii_lowercase()
-                        .contains(&name.to_ascii_lowercase())
-                        || name
-                            .to_ascii_lowercase()
-                            .contains(&g.name.to_ascii_lowercase())
+                    let g_lower = g.name.to_ascii_lowercase();
+                    g_lower.contains(&name_lower) || name_lower.contains(&g_lower)
                 });
                 if !already_listed {
+                    let util = *pdh_util
+                        .get_or_insert_with(|| self.pdh_gpu.as_mut().and_then(|p| p.sample()));
                     gpus.push(GpuSnapshot {
-                        name,
-                        utilization_percent: pdh_util,
+                        name: name.clone(),
+                        utilization_percent: util,
                         vram_used_mb: None,
-                        vram_total_mb: Some(total_vram_mb),
+                        vram_total_mb: Some(*total_vram_mb),
                         temperature_c: None,
                         power_watts: None,
-                        telemetry_source: if pdh_util.is_some() {
+                        telemetry_source: if util.is_some() {
                             "DXGI + PDH".to_string()
                         } else {
                             "DXGI".to_string()

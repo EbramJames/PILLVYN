@@ -1,6 +1,6 @@
 {
   "name": "pillvyn",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "PILLVYN — Premium, lightweight Dynamic Island desktop application for Windows 10 and Windows 11",
@@ -11,6 +11,8 @@
     "build": "tauri build",
     "build:frontend": "node scripts/build-frontend.mjs",
     "check:frontend": "node scripts/check-frontend.mjs",
+    "clean": "node scripts/clean.mjs",
+    "clean:all": "node scripts/clean.mjs --all",
     "tauri": "tauri"
   },
   "dependencies": {

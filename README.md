@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.4.0" src="https://img.shields.io/badge/Version-v1.4.0-f4f7ff?labelColor=090a0e" /></a>
+  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v1.5.0" src="https://img.shields.io/badge/Version-v1.5.0-f4f7ff?labelColor=090a0e" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
   <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
   <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
@@ -40,7 +40,16 @@
 | :---: |
 | <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
 
-## Features & v1.4.0 Highlights
+## Features & v1.5.0 Highlights
+
+- **Automatic Windows Startup Integration**:
+  - Enabled **Launch PILLVYN at Windows Startup** by default (`autostart: true` + `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registration during NSIS setup and automatic sync on startup), while cleanly honoring manual opt-outs saved in Settings Studio and removing startup entries on uninstall.
+- **Bundled Crisp Variable Typography (`Inter Variable` & `JetBrains Mono Variable`)**:
+  - Bundled offline SIL OFL 1.1 variable WOFF2 fonts across Latin, Latin-Ext, and Cyrillic scripts with OpenType UI alternates and `tabular-nums` alignment for steady telemetry readouts, clocks, sliders, and badges across Windows 10 and Windows 11.
+- **Backend, IPC & Frontend Optimization + Lean Project Hygiene**:
+  - Cut background CPU/handle churn in `HardwareCollector`, `GamingMonitor`, and `DownloadMonitor`, added adaptive telemetry cadence with immediate expand wakeups, cached DOM/artwork subtrees (`island-core.js`) and deduplicated hitbox IPC (`main.js`), configured slim dev debuginfo profiles, and added `npm run clean` ([ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+
+### Previous v1.4.0 Highlights
 
 - **Full Dynamic Island Repositioning & Reliable Settings Close**:
   - Added an **Interactive Screen Positioner** map, one-click corner/edge snap presets (**Top Left**, **Top Center**, **Top Right**, **Center**, **Bottom Center**), full-monitor X/Y sliders, and live **Move on Desktop** dragging in **Settings Studio → Display & Behavior** with automatic bottom-edge expansion lift across DPI scales.
@@ -77,9 +86,9 @@
 
 ## Installation
 
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.4.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
-2. Run the NSIS installer (supports **Current User** or **All Users**, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_1.4.0_x64-setup.exe.sha256`.
+1. Download the latest x64 Windows setup executable (**[`PILLVYN_1.5.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
+2. Run the NSIS installer (supports **Current User** or **All Users**, automatic **Windows Startup** registration, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
+3. Verify integrity (optional): compare against `PILLVYN_1.5.0_x64-setup.exe.sha256`.
 4. Launch **PILLVYN** from the Start Menu or system tray.
 
 > **Default Global Hotkeys:**
@@ -90,23 +99,20 @@
 
 ## Architecture
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed overview of windows, capabilities, native Win32/WinRT services, background threads, startup integration, and build optimization.
+
 ```text
 PILLVYN/
-├── src/                        # Vanilla JS, HTML5, CSS3 frontend (zero framework overhead)
-│   ├── index.html              # Floating Dynamic Island capsule UI
-│   ├── settings.html           # Dedicated 5-section Settings Studio window
-│   ├── tray.html               # Custom Obsidian Glass taskbar tray popover
-│   ├── styles/                 # Quiet Obsidian Glass tokens, island, module, tray & settings styles
+├── src/                        # Vanilla JS, HTML5, CSS3 frontend + bundled Inter/JetBrains Mono fonts
+│   ├── assets/                 # App icon and offline variable WOFF2 typography
+│   ├── styles/                 # Obsidian Glass tokens, island, module, tray & settings styles
 │   └── js/                     # Store, theme engine, core gestures, tray/settings & 12 modules
 ├── src-tauri/
 │   ├── capabilities/           # Restrictive per-window Tauri v2 capability definitions
-│   ├── nsis/                   # NSIS installer hooks & branded wizard bitmaps
-│   └── src/
-│       ├── config.rs           # Validated atomic JSON config persistence (v2 schema + auto-migration)
-│       ├── commands.rs         # Validated IPC command layer & asynchronous wakeup handles
-│       ├── island/             # Multi-monitor DPI geometry, click-outside & click-through controller
-│       └── services/           # Event-driven Windows Win32/WinRT, WASAPI & telemetry integrations
-├── docs/website/               # Static official product website (GitHub Pages ready)
+│   ├── nsis/                   # NSIS installer hooks, Windows Startup entry & branded bitmaps
+│   └── src/                    # Validated config, commands, DPI island geometry & native OS services
+├── scripts/                    # Frontend verification, asset build, clean-cache & dev server tools
+├── docs/                       # Architecture reference, screenshots, branding & static site
 └── .github/                    # CI/CD workflows, issue templates, PR template
 ```
 
@@ -124,7 +130,7 @@ PILLVYN/
 # Install Tauri CLI & JS packages
 npm install
 
-# Run frontend syntax checks
+# Run frontend syntax & asset checks
 npm run check:frontend
 
 # Run Rust tests
@@ -135,6 +141,9 @@ npm run dev
 
 # Build release binary + NSIS Windows setup executable
 npm run build
+
+# Reclaim bulky Cargo debug/intermediate caches while keeping built installers
+npm run clean
 ```
 
 ## Platform Notes & Honest Limitations

@@ -11,6 +11,8 @@
 !macro NSIS_HOOK_POSTINSTALL
   ; Ensure clean AppUserModelID registry hint for Start Menu & notifications
   WriteRegStr HKCU "Software\Classes\AppUserModelId\com.pillvyn.desktop" "DisplayName" "PILLVYN"
+  ; Register PILLVYN in current-user Windows Startup apps on installation
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "PILLVYN" '"$INSTDIR\PILLVYN.exe"'
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

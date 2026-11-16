@@ -21,6 +21,7 @@
   border-radius: 14px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-subtle);
+  contain: layout style;
 }
 
 .card-title-row {

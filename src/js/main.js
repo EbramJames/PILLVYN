@@ -51,6 +51,8 @@ let rangeDragReleaseTimer = null;
 let localSystemLockUntil = 0;
 let repositionMode = false;
 let desktopMove = null;
+let lastHitboxKey = '';
+let hitboxRafPending = false;
 
 const sendDesktopPosition = createThrottledSender(20, ({ topOffset, xOffset, monitorName }) => {
   invoke?.('move_island_position', {
@@ -134,16 +136,28 @@ function scheduleAutoCollapse() {
 function reportHitbox() {
   if (!invoke) return;
   const rect = shell.getBoundingClientRect();
+  const x = Math.max(0, rect.left);
+  const y = Math.max(0, rect.top);
+  const width = Math.max(80, rect.width);
+  const height = Math.max(24, rect.height);
+  const expanded = store.islandState === 'expanded';
+  const key = `${Math.round(x)},${Math.round(y)},${Math.round(width)},${Math.round(height)},${expanded ? 1 : 0},${store.activeTab}`;
+  if (key === lastHitboxKey) return;
+  lastHitboxKey = key;
   invoke('update_island_hitbox', {
-    hitbox: {
-      x: Math.max(0, rect.left),
-      y: Math.max(0, rect.top),
-      width: Math.max(80, rect.width),
-      height: Math.max(24, rect.height),
-    },
-    expanded: store.islandState === 'expanded',
+    hitbox: { x, y, width, height },
+    expanded,
     activeTab: store.activeTab,
   }).catch(() => {});
+}
+
+function scheduleReportHitbox() {
+  if (hitboxRafPending) return;
+  hitboxRafPending = true;
+  requestAnimationFrame(() => {
+    hitboxRafPending = false;
+    reportHitbox();
+  });
 }
 
 function setIslandState(next) {
@@ -154,7 +168,7 @@ function setIslandState(next) {
     updates.pinned = false;
   }
   patchStore(updates, 'state-change');
-  requestAnimationFrame(reportHitbox);
+  scheduleReportHitbox();
   setTimeout(reportHitbox, 380);
   if (next === 'expanded') {
     scheduleAutoCollapse();
@@ -567,7 +581,7 @@ function renderAll(_state, reason) {
       renderActivePanel();
     }
   }
-  requestAnimationFrame(reportHitbox);
+  scheduleReportHitbox();
 }
 
 subscribe(renderAll);
@@ -845,7 +859,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-const ro = new ResizeObserver(() => reportHitbox());
+const ro = new ResizeObserver(() => scheduleReportHitbox());
 ro.observe(shell);
 
 // Update clock smoothly once every 15s
@@ -890,7 +904,7 @@ async function bootstrap() {
       };
       store.config = nextCfg;
       applyVisualTheme(shell, nextCfg, store.activeProfile);
-      requestAnimationFrame(reportHitbox);
+      scheduleReportHitbox();
     });
     await listen('pillvyn://activities', (e) => patchStore({ activities: e.payload }, 'activities'));
     await listen('pillvyn://media', (e) => {
@@ -942,7 +956,7 @@ async function bootstrap() {
         shell.classList.remove('gesture-dragging');
       }
       renderCompactAndMinimized(store, api);
-      requestAnimationFrame(reportHitbox);
+      scheduleReportHitbox();
     });
     await listen('pillvyn://position-updated', (e) => {
       if (!e.payload || !store.config?.appearance) return;

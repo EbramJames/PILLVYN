@@ -77,7 +77,7 @@ let savedConfig = null;
 let config = null;
 let monitors = [];
 let plugins = null;
-let appVersion = '1.4.0';
+let appVersion = '1.5.0';
 let islandVisible = true;
 let islandExpanded = false;
 let activeSection = 'appearance';
@@ -1255,8 +1255,8 @@ function renderSystemSection(container) {
       ]),
       toggleRow(
         'Launch PILLVYN at Windows Startup',
-        'Start quietly in the top Dynamic Island position when signing in to Windows.',
-        config.autostart,
+        'Enabled by default — starts quietly in Dynamic Island mode when signing in to Windows.',
+        config.autostart !== false,
         (v) => { config.autostart = v; }
       ),
       toggleRow(
@@ -1498,7 +1498,7 @@ async function init() {
     config = structuredClone(initPayload.config);
     monitors = initPayload.monitors || [];
     plugins = initPayload.plugins || null;
-    appVersion = initPayload.app_version || '1.4.0';
+    appVersion = initPayload.app_version || '1.5.0';
     islandVisible = initPayload.island_visible !== false;
     islandExpanded = Boolean(initPayload.island_expanded);
 

@@ -606,7 +606,8 @@ button {
 }
 
 .hex-code {
-  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--text-2);
 }
@@ -639,7 +640,7 @@ button {
 }
 
 .slider-readout {
-  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   font-weight: 600;
@@ -820,7 +821,8 @@ input[type='range'].pro-slider:active::-webkit-slider-thumb {
 /* Lists for Hotkeys, Quick Actions, Profiles */
 .hotkey-input {
   width: 156px;
-  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
 
@@ -922,7 +924,8 @@ input[type='range'].pro-slider:active::-webkit-slider-thumb {
 }
 
 .position-pad-readout {
-  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--text-2);
   background: rgba(255, 255, 255, 0.06);

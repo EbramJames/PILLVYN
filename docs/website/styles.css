@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('assets/fonts/inter-latin-wght-normal.woff2') format('woff2');
+}
+
 :root {
   --bg: #07080b;
   --surface: rgba(255, 255, 255, 0.03);
@@ -11,7 +19,9 @@
 
 body {
   margin: 0;
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: "Inter Variable", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
   background:
     radial-gradient(55% 38% at 50% -4%, rgba(255, 255, 255, 0.065), transparent 72%),
     var(--bg);

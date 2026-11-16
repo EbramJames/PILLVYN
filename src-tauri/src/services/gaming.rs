@@ -102,18 +102,15 @@ impl Default for GamingMonitor {
 
 impl GamingMonitor {
     pub fn new() -> Self {
-        let sys = System::new_with_specifics(
-            RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
-        );
+        let refresh = ProcessRefreshKind::nothing().with_cpu().with_memory();
+        let sys = System::new_with_specifics(RefreshKind::nothing().with_processes(refresh));
         Self { sys }
     }
 
     pub fn collect(&mut self, cfg: &GamingConfig) -> (GamingSnapshot, Option<String>) {
-        self.sys.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::everything(),
-        );
+        let refresh = ProcessRefreshKind::nothing().with_cpu().with_memory();
+        self.sys
+            .refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true, refresh);
 
         let mut running_names: HashSet<String> = HashSet::new();
         for proc_item in self.sys.processes().values() {

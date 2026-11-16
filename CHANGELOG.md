@@ -5,6 +5,26 @@ All notable changes to **PILLVYN** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-16
+### Added
+- **Windows Startup Integration by Default**:
+  - Enabled `autostart: true` (`autostart_initialized: true`) cleanly for new and migrated installs in `config.rs`, registered PILLVYN in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` during NSIS setup (`installer.nsh`), inverted `setup()` autostart enforcement in `lib.rs` so OS registration follows configuration without overwriting defaults, and preserved explicit opt-outs saved via Settings Studio.
+- **Bundled Variable Typography (`Inter Variable` & `JetBrains Mono Variable`)**:
+  - Embedded offline SIL OFL 1.1 variable WOFF2 font subsets in `src/assets/fonts/` (Latin, Latin-Ext, Cyrillic + JetBrains Mono Latin) with `@font-face` rules, crisp OpenType alternates (`"cv02"`, `"cv03"`, `"cv04"`, `"cv11"`), and `tabular-nums` alignment across clocks, readouts, counters, badges, and sliders (`tokens.css`, `island.css`, `settings.css`, and the landing website).
+- **Project Organization & Workspace Footprint Hygiene (`scripts/clean.mjs`, `docs/ARCHITECTURE.md`)**:
+  - Added `npm run clean` (`scripts/clean.mjs`) and slim dev debuginfo profiles (`src-tauri/Cargo.toml`) to keep project disk usage lean (~30 MB instead of 24+ GB of accumulated Cargo debug artifacts) without removing any functionality or release deliverables.
+  - Added `docs/ARCHITECTURE.md` documenting the workspace layout, native Windows services, startup lifecycle, and build/clean tooling.
+
+### Changed & Optimized
+- **Backend Resource & Telemetry Optimization**:
+  - Switched `HardwareCollector` (`hardware.rs`) from `System::new_all()` to CPU+Memory-only `RefreshKind`, cached static DXGI adapters, sampled Windows PDH 3D counters only when needed alongside NVML, and throttled full disk/sensor re-enumeration.
+  - Switched `GamingMonitor` (`gaming.rs`) from heavy `ProcessRefreshKind::everything()` queries across all processes to lightweight `cpu + memory` sampling.
+  - Cached Steam library folder discovery with a 30s TTL in `DownloadMonitor` (`downloads.rs`).
+  - Added `telemetry_notify` immediate wakeups on island expand and adaptive telemetry cadence (`3.5s+` compact idle / `8s+` hidden) in `lib.rs`, eliminated redundant `pillvyn://activities` IPC emits on unchanged gaming/download ticks, and made `spawn_click_through_controller` (`island/mod.rs`) poll adaptively by cursor proximity.
+- **Frontend Render & IPC Deduplication**:
+  - Cached compact artwork (`artKey`), hover-peek buttons (`peekKey`), activity pills (`stripKey`), and navigation tabs (`navKey`) in `island-core.js` so playback ticks never re-decode album covers or rebuild unchanged DOM nodes.
+  - Deduplicated `update_island_hitbox` IPC payloads via `lastHitboxKey` and `scheduleReportHitbox()` in `main.js`, plus added CSS layout containment (`contain: layout style`) and compositor hints.
+
 ## [1.4.0] - 2026-11-16
 ### Added
 - **Full Dynamic Island Repositioning (`Display & Behavior` + Desktop Move)**:

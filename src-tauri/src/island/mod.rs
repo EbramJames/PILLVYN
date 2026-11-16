@@ -220,7 +220,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
 
             if !visible {
                 prev_mouse_down = false;
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::thread::sleep(std::time::Duration::from_millis(220));
                 continue;
             }
 
@@ -230,6 +230,7 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
             };
 
             let mut cursor_known = false;
+            let mut near_capsule = false;
             let should_ignore = if force_ct {
                 true
             } else if let (Ok(win_pos), Ok(scale)) =
@@ -246,6 +247,12 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
                         && local_x <= hitbox.x + hitbox.width + margin
                         && local_y >= hitbox.y - margin
                         && local_y <= hitbox.y + hitbox.height + margin;
+                    let prox = 120.0;
+                    near_capsule = inside
+                        || (local_x >= hitbox.x - prox
+                            && local_x <= hitbox.x + hitbox.width + prox
+                            && local_y >= hitbox.y - prox
+                            && local_y <= hitbox.y + hitbox.height + prox);
                     !inside
                 } else {
                     false
@@ -262,33 +269,35 @@ pub fn spawn_click_through_controller(app: AppHandle, state: Arc<Mutex<IslandWin
 
             // Detect fresh clicks strictly outside the Expanded pill so clicking anywhere on
             // another window or desktop collapses the island immediately (unless pinned).
-            let mouse_down = is_mouse_button_down();
-            if cursor_known && should_ignore && mouse_down && !prev_mouse_down {
-                if let Some(app_state) = app.try_state::<AppState>() {
-                    let expanded = app_state
-                        .island_expanded
-                        .lock()
-                        .map(|g| *g)
-                        .unwrap_or(false);
-                    let pinned = app_state.island_pinned.lock().map(|g| *g).unwrap_or(false);
-                    let last_exp = app_state.last_expanded_ms.lock().map(|g| *g).unwrap_or(0);
-                    let dismiss_enabled = app_state
-                        .config
-                        .lock()
-                        .map(|c| c.appearance.click_outside_dismiss)
-                        .unwrap_or(true);
-                    if expanded
-                        && !pinned
-                        && dismiss_enabled
-                        && now_ms().saturating_sub(last_exp) > 350
-                    {
-                        let _ = app.emit("pillvyn://dismiss-expanded", "outside_click");
+            let mut expanded_now = false;
+            if let Some(app_state) = app.try_state::<AppState>() {
+                expanded_now = app_state
+                    .island_expanded
+                    .lock()
+                    .map(|g| *g)
+                    .unwrap_or(false);
+                if expanded_now && cursor_known && should_ignore {
+                    let mouse_down = is_mouse_button_down();
+                    if mouse_down && !prev_mouse_down {
+                        let pinned = app_state.island_pinned.lock().map(|g| *g).unwrap_or(false);
+                        let last_exp = app_state.last_expanded_ms.lock().map(|g| *g).unwrap_or(0);
+                        let dismiss_enabled = app_state
+                            .config
+                            .lock()
+                            .map(|c| c.appearance.click_outside_dismiss)
+                            .unwrap_or(true);
+                        if !pinned && dismiss_enabled && now_ms().saturating_sub(last_exp) > 350 {
+                            let _ = app.emit("pillvyn://dismiss-expanded", "outside_click");
+                        }
                     }
+                    prev_mouse_down = mouse_down;
+                } else {
+                    prev_mouse_down = false;
                 }
             }
-            prev_mouse_down = mouse_down;
 
-            std::thread::sleep(std::time::Duration::from_millis(38));
+            let poll_ms = if expanded_now || near_capsule { 32 } else { 68 };
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
         }
     });
 }

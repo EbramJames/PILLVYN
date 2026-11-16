@@ -55,6 +55,7 @@ pub struct AppState {
     pub media_notify: Arc<Notify>,
     pub system_notify: Arc<Notify>,
     pub foreground_notify: Arc<Notify>,
+    pub telemetry_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -238,6 +239,9 @@ pub fn update_island_hitbox(
             let effective = effective_island_config(&state);
             let _ = apply_window_geometry(&island, &effective);
         }
+        if became_expanded {
+            state.telemetry_notify.notify_one();
+        }
         crate::emit_island_state(&app);
     }
 }
@@ -256,6 +260,7 @@ pub fn save_app_config(
     state: State<'_, AppState>,
     mut new_config: PillvynConfig,
 ) -> Result<PillvynConfig, String> {
+    new_config.autostart_initialized = true;
     new_config.sanitize();
     crate::validate_hotkeys_uniqueness(&new_config)?;
     save_config(&new_config)?;
@@ -354,6 +359,7 @@ pub fn save_app_config(
 
     state.foreground_notify.notify_one();
     state.system_notify.notify_one();
+    state.telemetry_notify.notify_one();
     let _ = app.emit("pillvyn://config", new_config.clone());
     let _ = app.emit("pillvyn://config-warnings", warnings);
     let _ = app.emit("pillvyn://tray-refresh", ());
