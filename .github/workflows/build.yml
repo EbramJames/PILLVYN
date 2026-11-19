@@ -1,0 +1,75 @@
+name: build
+
+# Every push builds and tests the Windows app. A tag like v3.0.0 also publishes it as a release:
+# installer, versioned x64 setup, portable exe, zip, SHA-256 checksums, and latest.json (used by the in-app updater).
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check formatting, lints, and tests
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --locked
+
+      - name: Build
+        working-directory: src-tauri
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw "tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress }
+          & $nsis /V2 "/DVERSION=$version" installer/pillvyn.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          $versioned = "dist/PILLVYN_${version}_x64-setup.exe"
+          Copy-Item dist/PILLVYN-Setup.exe $versioned
+          $setupSha = (Get-FileHash dist/PILLVYN-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$setupSha  PILLVYN-Setup.exe" | Set-Content dist/PILLVYN-Setup.exe.sha256 -Encoding ascii -NoNewline
+          "$setupSha  PILLVYN_${version}_x64-setup.exe" | Set-Content "$versioned.sha256" -Encoding ascii -NoNewline
+          Copy-Item src-tauri/target/release/pillvyn.exe dist/PILLVYN-Portable.exe
+          New-Item -ItemType Directory -Force dist/zip | Out-Null
+          Copy-Item src-tauri/target/release/pillvyn.exe dist/zip/PILLVYN.exe
+          Copy-Item LICENSE, README.md dist/zip/
+          Compress-Archive -Path dist/zip/* -DestinationPath dist/PILLVYN-Windows.zip
+          Remove-Item -Recurse dist/zip
+          @{ version = $version; sha256 = $setupSha; published = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content dist/latest.json -Encoding utf8NoBOM
+          "VERSION=$version" >> $env:GITHUB_ENV
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PILLVYN-Windows-${{ env.VERSION }}
+          path: dist/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PILLVYN ${{ env.VERSION }}
+          generate_release_notes: true
+          files: dist/*

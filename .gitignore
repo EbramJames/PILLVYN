@@ -26,5 +26,7 @@ npm-debug.log*
 *.msi
 *.sig
 *.zip
+*.pem
+/.claude/
 docs/bug/
 !src-tauri/icons/**

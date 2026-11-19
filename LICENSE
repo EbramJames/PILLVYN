@@ -1,5 +1,6 @@
 MIT License
 
+Copyright (c) 2026 raminturne
 Copyright (c) 2026 PILLVYN Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,3 +20,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----
+PILLVYN ships with tesseract.js and tesseract.js-core (Apache License 2.0,
+https://github.com/naptha/tesseract.js) and the Persian trained data of the
+Tesseract project (Apache License 2.0) in ui/ocr/.

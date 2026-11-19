@@ -1,169 +1,113 @@
-<p align="center">
-  <img src="docs/branding/pillvyn-logo.png" alt="PILLVYN Logo" width="118" height="118" />
-</p>
+<div align="center">
 
-<h1 align="center">PILLVYN</h1>
+<img src="docs/branding/pillvyn-logo.png" width="84" alt="PILLVYN logo">
 
-<p align="center">
-  <strong>Minimal, responsive Dynamic Island desktop hub for Windows 10 and Windows 11.</strong><br/>
-  Built with Rust, Tauri 2, HTML5, CSS3, and Vanilla JavaScript — packaged with NSIS.
-</p>
+# PILLVYN
 
-<p align="center">
-  <a href="https://github.com/EbramJames/PILLVYN/releases/latest"><img alt="Version: v2.0.0" src="https://img.shields.io/badge/Version-v2.0.0-f4f7ff?labelColor=090a0e" /></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" /></a>
-  <img alt="Platform: Windows 10 / 11 x64" src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0a0d15" />
-  <img alt="Stack: Rust + Tauri 2" src="https://img.shields.io/badge/Stack-Rust%20%2B%20Tauri%202-5b8cff" />
-</p>
+**A tiny dynamic island for Windows.** One small pill at the top of your screen that shows what is playing,
+catches your notifications, remembers what you copied, holds your files, and blinks at you in between.
+
+[![release](https://img.shields.io/github/v/release/EbramJames/PILLVYN?label=release&color=555)](https://github.com/EbramJames/PILLVYN/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/EbramJames/PILLVYN/total?label=downloads&color=555)](https://github.com/EbramJames/PILLVYN/releases)
+[![build](https://img.shields.io/github/actions/workflow/status/EbramJames/PILLVYN/build.yml?branch=main&label=build)](https://github.com/EbramJames/PILLVYN/actions/workflows/build.yml)
+![size](https://img.shields.io/badge/size-~3%20MB-555)
+[![license](https://img.shields.io/badge/license-MIT-555)](LICENSE)
+
+[![Windows installer](https://img.shields.io/badge/WINDOWS-INSTALLER-0a7cd6?style=for-the-badge)](https://github.com/EbramJames/PILLVYN/releases/latest/download/PILLVYN-Setup.exe)
+[![Windows portable exe](https://img.shields.io/badge/WINDOWS-PORTABLE%20.EXE-1f2328?style=for-the-badge)](https://github.com/EbramJames/PILLVYN/releases/latest/download/PILLVYN-Portable.exe)
+[![Windows zip](https://img.shields.io/badge/WINDOWS-.ZIP-1f2328?style=for-the-badge)](https://github.com/EbramJames/PILLVYN/releases/latest/download/PILLVYN-Windows.zip)
+
+[فارسی](#فارسی)
+
+<img src="docs/hero.jpg" width="860" alt="PILLVYN resting at the top of the Windows desktop">
+
+</div>
+
+## What it does
+
+- **Now playing.** Title, artist, cover, controls and a scrubber for whatever is playing on the system. Films and fullscreen games are left alone.
+- **Themes that move.** Liquid skins that drift at rest and flood with colour on the beat (or stay calm, if you switch that off). In **Venom** the pill itself turns to black goo.
+- **Notifications in one line.** Click to open that chat. While you are using the pill they wait beside it instead of taking it over.
+- **One hover away.** Screenshot, text grab, clipboard history, quick note, passwords, timer, notifications, settings.
+- **Smart copy.** A copied link can be opened, a sum gets its answer, a date its twin in the other calendar (Gregorian ⇄ Shamsi), a colour its swatch.
+- **File shelf.** Drop files on the pill; up to five sit there side by side until you drag them out again.
+- **Timer.** Stays in sight while it runs, even over a fullscreen app.
+- **Settings inside the island.** No extra windows.
+
+On its first start PILLVYN says hello and shows a list of everything it can do; it stays in the settings under *What PILLVYN can do*. A click on a row tries the thing itself.
+And also:
+
+- **Quick notes.** `Ctrl+Alt+N` from anywhere, type one line, Enter. A time in the line (`call Ali in 20m`, `at 18:30 gym`, «۱۰ دقیقه دیگه چای») turns it into a reminder.
+- **Passwords.** Generate one, confirm, and it asks which site and which e-mail it is for. Stored encrypted with your Windows account (DPAPI); copies clear themselves from the clipboard after 30 seconds.
+- **Text grab.** `Ctrl+Alt+T`, drag a box, and the text in it is on your clipboard. English is read by Windows' own OCR; Persian by a bundled Tesseract. Nothing leaves your machine.
+- **Clipboard history** with images and pins.
+- **Small signs.** A dot while the microphone or camera is in use, a line when the internet or a VPN goes up or down, Bluetooth devices and the charger.
+- **Updates itself.** New releases are downloaded from GitHub Releases, verified against their SHA-256 checksum, and installed with one click.
+
+## Install
+
+Download **[PILLVYN-Setup.exe](https://github.com/EbramJames/PILLVYN/releases/latest/download/PILLVYN-Setup.exe)** and run it.
+It installs for the current user only (no administrator prompt) and starts with Windows; both can be changed in the settings.
+
+Windows 10 or 11 with the WebView2 runtime (already part of Windows 11 and of current Windows 10).
+
+The installer is not code-signed, so Windows SmartScreen may ask once whether to run it.
+
+## Privacy
+
+PILLVYN makes no network requests except checking this repository for a new release (which can be switched off).
+Notifications, clipboard contents, notes and passwords stay on your computer.
+
+## Build it yourself
+
+```powershell
+cd src-tauri
+cargo build --release
+```
+
+The result is a single `pillvyn.exe` (around 6 MB). The installer is `installer/pillvyn.nsi` (NSIS).
+Every push is built and verified by [GitHub Actions](.github/workflows/build.yml); a tag `vX.Y.Z` publishes a release.
+
+## Platforms
+
+Windows today. The backend talks to Windows directly (notifications, media session, clipboard, click-through hit-testing, DPAPI vault) for native responsiveness and minimal overhead.
+
+## License
+
+[MIT](LICENSE). Bundles `tesseract.js` and Tesseract's Persian data (Apache 2.0).
 
 ---
 
-## Overview
+<div dir="rtl">
 
-**PILLVYN** places a quiet, dark-glassmorphic Dynamic Island capsule at the top-center of your Windows monitor. It stays click-through outside the capsule bounds so windows underneath remain completely unobstructed, never steals focus unnecessarily, and morphs smoothly between **Minimized**, **Compact**, and **Expanded** states using natural spring physics and intuitive gestures.
+## فارسی
 
-## Screenshots
+**PILLVYN یک جزیرهٔ کوچک و زنده برای ویندوز است.** یک قرص کوچک بالای صفحه که آهنگ در حال پخش را نشان می‌دهد،
+نوتیفیکیشن‌ها را می‌گیرد، چیزهایی که کپی کرده‌ای یادش می‌ماند، فایل‌هایت را نگه می‌دارد و بین این کارها پلک می‌زند.
 
-<p align="center">
-  <img src="docs/screenshots/compact-view.png" alt="PILLVYN Compact Dynamic Island Pill on Windows 11" width="520" />
-</p>
+### امکانات
 
-| Expanded Hub | Monitor (`Hardware / Net / Downloads / Gaming`) |
-| :---: | :---: |
-| <img src="docs/screenshots/expanded-home.png" alt="PILLVYN Expanded Hub" width="420" /> | <img src="docs/screenshots/expanded-stats.png" alt="PILLVYN Monitor Telemetry" width="420" /> |
+- **پخش موزیک:** نام آهنگ، خواننده، کاور، دکمه‌های کنترل و نوار جلو و عقب بردن. با فیلم و بازی تمام‌صفحه کاری ندارد.
+- **تم‌های متحرک:** تم‌های مایع که آرام حرکت می‌کنند و با ضرب آهنگ پر از رنگ می‌شوند (می‌شود واکنش به موزیک را خاموش کرد).
+- **ونوم:** خود جزیره به لجن سیاه زنده تبدیل می‌شود.
+- **نوتیفیکیشن در یک خط:** با کلیک همان چت باز می‌شود. وقتی مشغول کار با جزیره‌ای، کنار آن منتظر می‌ماند.
+- **کپی هوشمند:** لینکِ کپی‌شده باز می‌شود، حساب جواب می‌گیرد، تاریخ میلادی و شمسی به هم تبدیل می‌شوند.
+- **نگه‌داشتن فایل:** فایل را روی جزیره رها کن؛ کنار هم می‌مانند تا دوباره بیرونشان بکشی.
+- **یادداشت سریع:** `Ctrl+Alt+N` از هر جا. اگر در متن زمان باشد («۱۰ دقیقه دیگه چای») یادآور می‌شود.
+- **رمزها:** رمز می‌سازد، سایت و ایمیل را می‌پرسد و ذخیره می‌کند (رمزنگاری‌شده با حساب ویندوز).
+- **خواندن متن از صفحه:** `Ctrl+Alt+T`، دور متن کادر بکش؛ انگلیسی و فارسی. همه‌چیز روی سیستم خودت انجام می‌شود.
+- **تایمر، تاریخچهٔ کپی با عکس، نشانگر میکروفون و دوربین، وضعیت اینترنت و VPN.**
+- **راهنمای داخل برنامه:** بار اول خودش فهرست قابلیت‌ها را نشان می‌دهد؛ بعداً از تنظیمات، «What PILLVYN can do».
+- **آپدیت خودکار:** نسخهٔ جدید دانلود، با چک‌سام SHA-256 بررسی و با یک کلیک نصب می‌شود.
 
-| Redesigned Settings Studio | Custom Obsidian Glass Tray Menu |
-| :---: | :---: |
-| <img src="docs/screenshots/settings-studio.png" alt="PILLVYN Settings Studio" width="460" /> | <img src="docs/screenshots/tray-menu.png" alt="PILLVYN Custom Obsidian Glass Tray Menu" width="230" /> |
+### نصب
 
-| Tools (`Timers / Shortcuts / Plugins / AI`) |
-| :---: |
-| <img src="docs/screenshots/expanded-widgets.png" alt="PILLVYN Tools & Widgets" width="420" /> |
+فایل **[PILLVYN-Setup.exe](https://github.com/EbramJames/PILLVYN/releases/latest/download/PILLVYN-Setup.exe)** را دانلود و اجرا کن.
+فقط برای کاربر فعلی نصب می‌شود و دسترسی ادمین نمی‌خواهد.
 
-## Features & v2.0.0 Highlights
+### حریم خصوصی
 
-- **Apple-Inspired Fluid Motion & Contemporary UI**:
-  - Elastic spring morphing across Minimized, Compact, and Expanded states, silky hover-to-peek controls glide, directional left/right tab and sub-tab slide animations, subtle frosted album-art ambient glow behind the Media hero, a compact **SVG Circular Progress Ring**, and tactile micro-bounces — strictly respecting **Reduced Motion**.
-- **SMS Arrival "Ding" Effect (Audio + Luminous Shimmer)**:
-  - Incoming SMS & messaging alerts (Phone Link, Messages, WhatsApp, Telegram, Signal, Discord, Slack, and custom alerts) trigger a refined Win32 PCM double-bell chime paired with an emerald-indigo capsule halo sweep, SMS pill badge, and instant **Test SMS Ding** controls in Alerts & Settings Studio — automatically hushed during Do Not Disturb and Focus Mode.
-- **Intuitive Toggleable Emojis Across Island & Tray**:
-  - Unified, tasteful contextual emojis (`💬`, `🔔`, `🎵`, `⏱️`, `📥`, `🎮`, `☀️`, `🌧️`, `⚡`, `🪫`, `🛡️`, `📌`) across Compact/Minimized pills, Live Activity badges, weather conditions, battery cards, and the Tray Menu, toggleable anytime in **Settings Studio → Display & Behavior**.
+PILLVYN هیچ درخواست اینترنتی‌ای نمی‌فرستد، به‌جز بررسی همین مخزن برای نسخهٔ جدید (که می‌شود خاموشش کرد).
+نوتیفیکیشن‌ها، کلیپ‌بورد، یادداشت‌ها و رمزها روی سیستم خودت می‌مانند.
 
-### Previous v1.5.0 Highlights
-
-- **Automatic Windows Startup Integration**:
-  - Enabled **Launch PILLVYN at Windows Startup** by default (`autostart: true` + `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registration during NSIS setup and automatic sync on startup), while cleanly honoring manual opt-outs saved in Settings Studio and removing startup entries on uninstall.
-- **Bundled Crisp Variable Typography (`Inter Variable` & `JetBrains Mono Variable`)**:
-  - Bundled offline SIL OFL 1.1 variable WOFF2 fonts across Latin, Latin-Ext, and Cyrillic scripts with OpenType UI alternates and `tabular-nums` alignment for steady telemetry readouts, clocks, sliders, and badges across Windows 10 and Windows 11.
-- **Backend, IPC & Frontend Optimization + Lean Project Hygiene**:
-  - Cut background CPU/handle churn in `HardwareCollector`, `GamingMonitor`, and `DownloadMonitor`, added adaptive telemetry cadence with immediate expand wakeups, cached DOM/artwork subtrees (`island-core.js`) and deduplicated hitbox IPC (`main.js`), configured slim dev debuginfo profiles, and added `npm run clean` ([ARCHITECTURE.md](docs/ARCHITECTURE.md)).
-
-### Previous v1.4.0 Highlights
-
-- **Full Dynamic Island Repositioning & Reliable Settings Close**:
-  - Added an **Interactive Screen Positioner** map, one-click corner/edge snap presets (**Top Left**, **Top Center**, **Top Right**, **Center**, **Bottom Center**), full-monitor X/Y sliders, and live **Move on Desktop** dragging in **Settings Studio → Display & Behavior** with automatic bottom-edge expansion lift across DPI scales.
-  - Fixed the Settings Studio window close bug by eliminating blocking JS `onCloseRequested` interception and moving preview/reposition cleanup into a native non-blocking Tauri window event hook.
-
-- **Zero-Spawn Windows Integration & Taskbar Cleanliness**:
-  - Replaced background `netsh.exe` and `powershell.exe` child-process polling with pure in-process Windows `GetIfTable2` IEEE 802.11 link detection and native COM `IWbemLocator` + DDC/CI brightness — eliminating the Windows 11 taskbar Location Services (`Network Command Shell`) indicator flicker and background cursor flashes.
-  - Enforced `WS_EX_TOOLWINDOW` (stripping `WS_EX_APPWINDOW`) on frameless capsule and tray windows with work-area-clamped dynamic resizing.
-- **Hardened Drag Sliders & End-to-End Button Sync**:
-  - Expanded slider drag hitboxes across Hub, Media, Controls, and Settings Studio (`createRangeSlider`), protected active slider drags against background panel re-renders and accidental swipe gestures, synchronized factory defaults (`0.88` opacity, `2000ms` telemetry interval, `25` clipboard items), and added live `%`/timestamp readouts during dragging.
-  - Fixed the **Wi-Fi Flyout** (`ms-availablenetworks:`) URI handler, kept Clipboard search input focus intact across live filtering, preserved AI prompt drafts across updates, allowed pre-save update checks from Settings Studio, synchronized `Expand`/`Hide` sidebar controls & tray states cleanly, and surfaced actionable inline error notices.
-- **Custom Obsidian Glass Tray Menu & Full State Sync**:
-  - Replaced the native Windows tray right-click menu with a lightweight frameless Obsidian Glass popover showing active Live Status, Now Playing strip, toggle switches for **Island Visible**, **Do Not Disturb**, and **Focus Mode**, quick **Expand / Collapse**, **Settings Studio**, and **Quit** — automatically positioned inside the active monitor work area whether opened from the taskbar or the Windows tray overflow flyout.
-  - Real-time state synchronization (`pillvyn://island-state`, live appearance preview, startup Windows autostart sync, and clean disabling of background monitors/HUD overrides when a module is turned off).
-- **Redesigned 5-Tab Settings Studio**:
-  - Cleanly organized into **Appearance**, **Display & Behavior**, **Modules & Tools**, **Shortcuts & Apps**, and **Privacy & System** with a live Capsule Preview stage, curated Accent swatches working across every theme, interactive range sliders with filled tracks & single-click defaults, keystroke recorder for global hotkeys, and full management for Quick Actions and Per-App Rules.
-- **Quiet Obsidian Glass UI & Dynamic Island Core**:
-  - Frameless, layered obsidian glass with uniform monochrome SVG icons and clean typography.
-  - Streamlined **7-tab Expanded Dock** (`Hub`, `Media`, `Controls`, `Monitor`, `Alerts`, `Clip`, `Tools`) with segmented sub-views so the pill stays calm and uncluttered.
-  - **Intuitive Gestures & Controls**:
-    - Hover the Compact pill to reveal inline playback controls (**Hover-to-Peek**).
-    - Scroll the mouse wheel over Compact to adjust master volume (`Shift+Wheel` for brightness where supported).
-    - Swipe horizontally on Compact to skip tracks or cycle Live Activities; swipe down to Expand, swipe up to Minimize.
-    - Swipe left/right inside Expanded to move across tabs; swipe up to Collapse.
-    - Click anywhere outside Expanded to auto-dismiss cleanly — or click the header **Pin** button to lock the hub open while working.
-    - Keyboard shortcuts inside Expanded: `Escape` to collapse, `ArrowLeft`/`ArrowRight` to switch tabs, `Space` for play/pause.
-- **Event-Driven Synchronization & Multiple Live Activities**:
-  - **WinRT GSMTC Listeners**: Event-driven track/timeline updates across multiple simultaneous media sessions with instant source switching (Spotify, Chrome, Edge, Firefox, Opera, Yandex Browser, VLC, Apple Music, Amazon Music, MusicBee, Winamp, mpv, Kodi).
-  - **WASAPI CoreAudio Callbacks**: `IAudioEndpointVolumeCallback` + `IMMNotificationClient` wake PILLVYN immediately when hardware volume keys, mute buttons, or default audio devices change, briefly flashing the system HUD without polling spam.
-  - **Win32 Foreground & Fullscreen Sync**: `SetWinEventHook` + `SHQueryUserNotificationState` apply per-app profiles automatically without stealing focus or spawning child CLI processes.
-- **System Controls & Hardware Monitor**: Master/mic gain & mute, default device switching (`IPolicyConfig`), cached WMI/DDC-CI display brightness where exposed by the monitor, CPU/RAM/Disk (`sysinfo`), DXGI/PDH GPU load, and NVIDIA NVML temperatures/VRAM/wattage where supported.
-- **Anti-Cheat Safe Gaming, Downloads, Clipboard & Network**: Native registry Steam `RunningAppID` & process detection without DLL injection, `.crdownload`/`.part`/`.opdownload`/Steam `.acf` download ETA, `AddClipboardFormatListener` history with secret filtering, `GetIfTable2` throughput, ICMP latency, and VPN detection.
-- **Tools, Plugins, Optional AI & Updater**: Quick shortcuts with strict scheme validation, countdown timers, stopwatch, 12h/24h clock & Open-Meteo weather, local `plugin.json` manifests (`%APPDATA%\pillvyn\PILLVYN\config\plugins`), strictly opt-in local Ollama/OpenAI-compatible AI, global hotkeys with duplicate validation, Windows autostart, and consent-gated GitHub Release updates.
-
-## Installation
-
-1. Download the latest x64 Windows setup executable (**[`PILLVYN_2.0.0_x64-setup.exe`](https://github.com/EbramJames/PILLVYN/releases/latest)**) from **Releases**.
-2. Run the NSIS installer (supports **Current User** or **All Users**, automatic **Windows Startup** registration, Start Menu & Desktop shortcuts, clean upgrade shutdown, and automatic Microsoft Edge WebView2 verification).
-3. Verify integrity (optional): compare against `PILLVYN_2.0.0_x64-setup.exe.sha256`.
-4. Launch **PILLVYN** from the Start Menu or system tray.
-
-> **Default Global Hotkeys:**
-> - `Alt+Shift+Space`: Expand / Collapse Island
-> - `Ctrl+Alt+H`: Show / Hide Island
-> - `Ctrl+Alt+D`: Toggle Do Not Disturb
-> - `Alt+Shift+V`: Open Clipboard Drawer
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed overview of windows, capabilities, native Win32/WinRT services, background threads, startup integration, and build optimization.
-
-```text
-PILLVYN/
-├── src/                        # Vanilla JS, HTML5, CSS3 frontend + bundled Inter/JetBrains Mono fonts
-│   ├── assets/                 # App icon and offline variable WOFF2 typography
-│   ├── styles/                 # Obsidian Glass tokens, island, module, tray & settings styles
-│   └── js/                     # Store, theme engine, core gestures, tray/settings & 12 modules
-├── src-tauri/
-│   ├── capabilities/           # Restrictive per-window Tauri v2 capability definitions
-│   ├── nsis/                   # NSIS installer hooks, Windows Startup entry & branded bitmaps
-│   └── src/                    # Validated config, commands, DPI island geometry & native OS services
-├── scripts/                    # Frontend verification, asset build, clean-cache & dev server tools
-├── docs/                       # Architecture reference, screenshots, branding & static site
-└── .github/                    # CI/CD workflows, issue templates, PR template
-```
-
-## Building from Source
-
-### Prerequisites (Windows 10/11 x64)
-- [Rust](https://rustup.rs/) (`stable-x86_64-pc-windows-msvc`, 1.82+)
-- Visual Studio Build Tools 2022 (*Desktop development with C++* + Windows 10/11 SDK)
-- [Node.js](https://nodejs.org/) 20+
-- [NSIS 3.x](https://nsis.sourceforge.io/) (for `npm run build` installer generation)
-- Microsoft Edge WebView2 Runtime (pre-installed on Windows 11 and modern Windows 10)
-
-### Commands
-```bash
-# Install Tauri CLI & JS packages
-npm install
-
-# Run frontend syntax & asset checks
-npm run check:frontend
-
-# Run Rust tests
-cargo test --manifest-path src-tauri/Cargo.toml
-
-# Run in development mode
-npm run dev
-
-# Build release binary + NSIS Windows setup executable
-npm run build
-
-# Reclaim bulky Cargo debug/intermediate caches while keeping built installers
-npm run clean
-```
-
-## Platform Notes & Honest Limitations
-- **Windows Action Center (`UserNotificationListener`)**: Windows restricts reading global Action Center toast history to apps with MSIX Package Identity. When distributed as an unpackaged NSIS Win32 app, PILLVYN transparently switches to its internal/plugin/timer/download Notification Hub without faking OS toasts.
-- **FPS Telemetry**: To remain 100% safe around anti-cheat systems (Vanguard, EAC, BattlEye), PILLVYN does not inject hooks into DirectX/Vulkan games; Gaming Mode reports live CPU, RAM, GPU, VRAM, and Steam state without risky injection.
-- **Display Brightness**: Laptop internal displays support WMI brightness; desktop external monitors require DDC/CI enabled in the monitor OSD. Unsupported displays are reported clearly rather than simulated.
-- **CPU Temperatures**: Windows does not expose standardized unprivileged CPU die temperature APIs across all motherboards without ring-0 kernel drivers; temperatures are shown when reported by ACPI/NVML sensors and omitted cleanly otherwise.
-
-## Contributing & Security
-- See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and plugin development instructions.
-- See [SECURITY.md](SECURITY.md) for our security model and vulnerability reporting process.
-
-## License
-Released under the [MIT License](LICENSE).
+</div>
