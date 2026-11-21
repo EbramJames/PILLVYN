@@ -10,12 +10,15 @@ use windows::Win32::System::Registry::*;
 use crate::sys;
 
 static SETTINGS: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
-const THEMES: [&str; 10] = [
-    "black", "nebula", "crystal", "ember", "reactor", "venom", "cloud", "water", "lava", "ice",
+const THEMES: [&str; 12] = [
+    "glass", "black", "nebula", "aurora", "crystal", "ember", "reactor", "venom", "cloud", "water",
+    "lava", "ice",
 ];
-const BOOLS: [&str; 15] = [
+const FACES: [&str; 3] = ["eyes", "clock", "logo"];
+const BOOLS: [&str; 16] = [
     "autoUpdate",
     "musicReact",
+    "shimmer",
     "netAlerts",
     "sensorDot",
     "smartCopy",
@@ -37,16 +40,35 @@ fn defaults() -> Map<String, Value> {
         "autoHide": true, "dndHint": false, "toured": false, "calendar": "gregorian", "hideVideo": true,
         "copyPreview": true, "clipHistory": true, "deviceAlerts": true, "downloadAlerts": true, "shelf": true, "visuals": true,
         "notifSeconds": 4,          // how long a notification stays on the pill
-        "face": "eyes",             // what the resting pill shows: "eyes" or "clock"
+        "face": "eyes",             // what the resting pill shows: "eyes", "clock", or "logo"
         "noteHotkey": true,         // Ctrl+Alt+N opens the quick note from anywhere
         "vaultLength": 18, "vaultSymbols": true, "lastUser": "",
-        "skin": "black",            // the resting pill: plain black or one of the animated skins
-        "musicTheme": "sky",        // what plays behind the track: "sky" (colours of the cover) or a skin
+        "skin": "glass",            // the resting pill: liquid glass, obsidian, or an animated theme
+        "musicTheme": "sky",        // what plays behind the track: "sky" or an animated skin
+        "shimmer": true,            // glass rim glint & state-change shimmer sweep
         "netAlerts": true, "sensorDot": true, "smartCopy": true, "musicReact": true, "autoUpdate": true,
     })
     .as_object()
     .cloned()
     .unwrap_or_default()
+}
+
+fn valid_skin(v: &str) -> bool {
+    THEMES.contains(&v)
+}
+fn valid_face(v: &str) -> bool {
+    FACES.contains(&v)
+}
+fn valid_calendar(v: &str) -> bool {
+    CALENDARS.contains(&v)
+}
+fn valid_notif_seconds(v: f64) -> Option<i64> {
+    let n = v.round() as i64;
+    (2..=15).contains(&n).then_some(n)
+}
+fn valid_vault_length(v: f64) -> Option<i64> {
+    let n = v.round() as i64;
+    (8..=40).contains(&n).then_some(n)
 }
 fn file() -> std::path::PathBuf {
     sys::data_dir().join("settings.json")
@@ -102,43 +124,35 @@ pub fn apply(key: &str, value: &Value) {
             set_autostart(on);
         }
         "calendar" => {
-            if let Some(v) = value.as_str().filter(|v| CALENDARS.contains(v)) {
+            if let Some(v) = value.as_str().filter(|v| valid_calendar(v)) {
                 put(key, v.into());
             }
         }
         "face" => {
-            if let Some(v) = value.as_str().filter(|v| ["eyes", "clock"].contains(v)) {
+            if let Some(v) = value.as_str().filter(|v| valid_face(v)) {
                 put(key, v.into());
             }
         }
         "skin" => {
-            if let Some(v) = value.as_str().filter(|v| THEMES.contains(v)) {
+            if let Some(v) = value.as_str().filter(|v| valid_skin(v)) {
                 put(key, v.into());
             }
         }
         "musicTheme" => {
             if let Some(v) = value
                 .as_str()
-                .filter(|v| *v == "sky" || (THEMES.contains(v) && *v != "black"))
+                .filter(|v| *v == "sky" || (valid_skin(v) && *v != "black"))
             {
                 put(key, v.into());
             }
         }
         "notifSeconds" => {
-            if let Some(n) = value
-                .as_f64()
-                .map(|n| n.round() as i64)
-                .filter(|n| (2..=15).contains(n))
-            {
+            if let Some(n) = value.as_f64().and_then(valid_notif_seconds) {
                 put(key, n.into());
             }
         }
         "vaultLength" => {
-            if let Some(n) = value
-                .as_f64()
-                .map(|n| n.round() as i64)
-                .filter(|n| (8..=40).contains(n))
-            {
+            if let Some(n) = value.as_f64().and_then(valid_vault_length) {
                 put(key, n.into());
             }
         }
@@ -223,5 +237,44 @@ pub fn ensure_autostart() {
             "start-with-Windows entry written -> {}",
             autostart_on()
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_include_glass_theme_and_shimmer() {
+        let d = defaults();
+        assert_eq!(d.get("skin").and_then(Value::as_str), Some("glass"));
+        assert_eq!(d.get("face").and_then(Value::as_str), Some("eyes"));
+        assert_eq!(d.get("shimmer").and_then(Value::as_bool), Some(true));
+        assert_eq!(d.get("notifSeconds").and_then(Value::as_i64), Some(4));
+    }
+
+    #[test]
+    fn validates_themes_faces_and_ranges() {
+        for skin in [
+            "glass", "black", "nebula", "aurora", "crystal", "ember", "reactor", "venom",
+        ] {
+            assert!(valid_skin(skin), "expected valid skin {skin}");
+        }
+        assert!(!valid_skin("unknown"));
+
+        for face in ["eyes", "clock", "logo"] {
+            assert!(valid_face(face));
+        }
+        assert!(!valid_face("invalid"));
+
+        assert_eq!(valid_notif_seconds(2.0), Some(2));
+        assert_eq!(valid_notif_seconds(15.0), Some(15));
+        assert_eq!(valid_notif_seconds(1.0), None);
+        assert_eq!(valid_notif_seconds(16.0), None);
+
+        assert_eq!(valid_vault_length(8.0), Some(8));
+        assert_eq!(valid_vault_length(40.0), Some(40));
+        assert_eq!(valid_vault_length(7.0), None);
+        assert_eq!(valid_vault_length(41.0), None);
     }
 }

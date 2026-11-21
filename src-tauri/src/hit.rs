@@ -226,32 +226,48 @@ pub fn start() {
     });
 }
 
-/// The quick-note shortcut (Ctrl+Alt+N). Registered on its own thread, switched with the setting.
+/// Global hotkeys (Ctrl+Alt+N quick note, Ctrl+Alt+T text grab), registered independently so one conflict never disables the other.
 pub static HOTKEY_WANTED: AtomicBool = AtomicBool::new(true);
 pub fn start_hotkey() {
     std::thread::spawn(|| unsafe {
-        let mut have = false;
-        let mut failed = false;
+        let (mut have_note, mut have_ocr) = (false, false);
+        let (mut failed_note, mut failed_ocr) = (false, false);
         loop {
             let want = HOTKEY_WANTED.load(SeqCst);
-            if want && !have && !failed {
-                have = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32)
-                    .is_ok();
-                if !have {
-                    failed = true;
-                    sys::log("Ctrl+Alt+N is taken by another program: quick-note shortcut is off");
-                } else if RegisterHotKey(None, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32)
-                    .is_err()
-                {
-                    sys::log("Ctrl+Alt+T is taken by another program: text-grab shortcut is off");
+            if want {
+                if !have_note && !failed_note {
+                    have_note =
+                        RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32)
+                            .is_ok();
+                    if !have_note {
+                        failed_note = true;
+                        sys::log(
+                            "Ctrl+Alt+N is taken by another program: quick-note shortcut is off",
+                        );
+                    }
                 }
-            } else if !want && have {
-                let _ = UnregisterHotKey(None, 1);
-                let _ = UnregisterHotKey(None, 2);
-                have = false;
-            }
-            if !want {
-                failed = false;
+                if !have_ocr && !failed_ocr {
+                    have_ocr =
+                        RegisterHotKey(None, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32)
+                            .is_ok();
+                    if !have_ocr {
+                        failed_ocr = true;
+                        sys::log(
+                            "Ctrl+Alt+T is taken by another program: text-grab shortcut is off",
+                        );
+                    }
+                }
+            } else {
+                if have_note {
+                    let _ = UnregisterHotKey(None, 1);
+                    have_note = false;
+                }
+                if have_ocr {
+                    let _ = UnregisterHotKey(None, 2);
+                    have_ocr = false;
+                }
+                failed_note = false;
+                failed_ocr = false;
             }
             let mut msg = MSG::default();
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {

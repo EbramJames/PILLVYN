@@ -3,7 +3,7 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const island = $('#island'), glow = $('#glow'), stackEl = $('#stack'), stackList = $('#stack-list'), stackHead = $('#stack-head');
+const island = $('#island'), glow = $('#glow'), sheen = $('#sheen'), stackEl = $('#stack'), stackList = $('#stack-list'), stackHead = $('#stack-head');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ------------------------------------------------------------ icons
@@ -54,6 +54,11 @@ const ICONS = {
   search: `<circle ${S} cx="10.5" cy="10.5" r="6"/><path ${S} d="M15 15l5 5"/>`,
   edit: `<path ${S} d="M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4"/>`,
   gear: `<circle ${S} cx="12" cy="12" r="2.8"/><path ${S} d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4L18 18M18 6l-1.6 1.6M7.6 16.4L6 18"/>`,
+  palette: `<path ${S} d="M12 3.5a8.5 8.5 0 1 0 0 17h1.4a2.2 2.2 0 0 0 1.6-3.7 1.8 1.8 0 0 1 1.3-3h1.2a3 3 0 0 0 3-3A7.3 7.3 0 0 0 12 3.5z"/><circle fill="currentColor" cx="8.2" cy="10.2" r="1.1"/><circle fill="currentColor" cx="11.8" cy="7.8" r="1.1"/><circle fill="currentColor" cx="15.8" cy="9.6" r="1.1"/>`,
+  sliders: `<path ${S} d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle ${S} cx="16" cy="7" r="2"/><circle ${S} cx="10" cy="12" r="2"/><circle ${S} cx="18" cy="17" r="2"/>`,
+  sparkles: `<path ${S} d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6zM18.5 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7zM5.5 15.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z"/>`,
+  info: `<circle ${S} cx="12" cy="12" r="8.5"/><path ${S} d="M12 11v5.2"/><circle fill="currentColor" cx="12" cy="8" r="1.1"/>`,
+  ext: `<path ${S} d="M14 5h5v5M19 5l-8.5 8.5M10 6.5H6.5A2 2 0 0 0 4.5 8.5v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V14"/>`,
 };
 const svg = (name) => `<svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
 const setIcon = (el, name) => { if (el.dataset.cur !== name) { el.innerHTML = svg(name); el.dataset.cur = name; } };
@@ -90,9 +95,9 @@ const st = {
   face: 'eyes', settings: {}, notes: [], vault: { items: [] }, ctx: {}, lastUser: '',
   vaultQ: '', vaultSel: 0,                         // the search over saved passwords, and the row Enter would copy
   gen: { pass: '', len: 18, symbols: true },
-  skin: 'black', musicTheme: 'sky',                // what the pill wears at rest / while music plays
+  skin: 'glass', musicTheme: 'sky',                // what the pill wears at rest / while music plays
   net: { online: true, vpn: '', proxy: false }, sensors: { mic: [], cam: [] },
-  smartCopy: true, hudAct: null, muteClipUntil: 0, react: true,
+  smartCopy: true, hudAct: null, muteClipUntil: 0, react: true, shimmer: true, settingsTab: 'appearance',
 };
 // the window takes the mouse only while the cursor is on the island (or a text field is open)
 let mouseSent = null;
@@ -215,7 +220,13 @@ window.pillvyn.onPress(({ x, y }) => {
 });
 window.pillvyn.onRelease(() => { setTimeout(() => { if (st.scrubbing) endScrub(true); }, 120); });   // a scrub whose mouse-up went elsewhere
 
-function bump() { island.classList.remove('bump'); void island.offsetWidth; island.classList.add('bump'); }
+function triggerSheen() {
+  if (!st.shimmer || st.tucked || !sheen) return;
+  sheen.classList.remove('go');
+  void sheen.offsetWidth;
+  sheen.classList.add('go');
+}
+function bump() { island.classList.remove('bump'); void island.offsetWidth; island.classList.add('bump'); triggerSheen(); }
 let flashT = 0;
 function flash(text, color) {
   const f = $('#flash');
@@ -442,7 +453,7 @@ window.pillvyn.clipsGet().then(setClips);
 
 function renderStack() {
   stackList.textContent = '';
-  if (st.stackKind !== 'vault' && stackHead.dataset.kind) { stackHead.textContent = ''; stackHead.dataset.kind = ''; stackHead.classList.remove('on'); }
+  if (st.stackKind !== 'vault' && st.stackKind !== 'settings' && stackHead.dataset.kind) { stackHead.textContent = ''; stackHead.dataset.kind = ''; stackHead.classList.remove('on'); }
   if (st.stackKind === 'files') { renderFiles(); return; }
   if (st.stackKind === 'clips') { renderClips(); return; }
   if (st.stackKind === 'notes') { renderNotes(); return; }
@@ -617,8 +628,12 @@ $('#t-shelf').addEventListener('dragstart', (e) => { e.preventDefault(); window.
 // ------------------------------------------------------------ media
 const DEFAULT_PAL = ['#1f0e6b', '#33199a', '#4c2cbf'];     // dark violet night sky (deep enough that white text stays easy to read)
 // Skins: animated surfaces the pill can wear. At rest they move slowly; with music they react to the sound.
+const SKIN_ORDER = ['glass', 'black', 'nebula', 'aurora', 'crystal', 'ember', 'reactor', 'venom'];
 const THEMES = {
+  glass: { name: 'Liquid Glass', pal: ['#7c4dff', '#a78bfa', '#e0e7ff'] },
+  black: { name: 'Obsidian', pal: ['#7c4dff', '#a78bfa', '#c4b5fd'] },
   nebula: { name: 'Nebula', pal: ['#7a1fd1', '#c0269a', '#ff4f9a'] },
+  aurora: { name: 'Aurora', pal: ['#10b981', '#22d3ee', '#8b5cf6'] },
   crystal: { name: 'Sapphire', pal: ['#2b36d9', '#5a48f0', '#9a6bff'] },
   ember: { name: 'Ember', pal: ['#a8081d', '#dc1230', '#ff4a3d'] },
   reactor: { name: 'Reactor', pal: ['#2f8f12', '#6fd61f', '#b6ff3a'] },
@@ -771,7 +786,12 @@ let bass = 0, bassSlow = 0, energy = 0, heard = null, heardAt = 0;
 // the Rust side listens to what the speakers play and sends 24 band levels about 40 times a second
 window.pillvyn.onLevels((list) => { heard = list; heardAt = performance.now(); });
 function sampleLevels(t, playing) {
-  if (st.fakeLevels) { heard = Array.from({ length: NB }, (_, i) => st.fakeLevels * (0.5 + 0.5 * Math.sin(t * 0.006 + i * 1.3))); heardAt = t; }     // debug: pretend there is sound
+  if (st.fakeLevels) {
+    heard = Array.isArray(st.fakeLevels)
+      ? Array.from({ length: NB }, (_, i) => clamp(Number(st.fakeLevels[i % st.fakeLevels.length]) || 0, 0, 1))
+      : Array.from({ length: NB }, (_, i) => Number(st.fakeLevels) * (0.5 + 0.5 * Math.sin(t * 0.006 + i * 1.3)));
+    heardAt = t;
+  }
   if (playing && heard && t - heardAt < 400) {
     for (let i = 0; i < NB; i++) { const v = heard[i] || 0; levels[i] += (v - levels[i]) * (v > levels[i] ? 0.55 : 0.16); }
   } else {
@@ -891,6 +911,82 @@ function paintLiquid(g, t, x0, x1, W, A, P) {
 }
 const PAINT = {
   sky: paintSky,
+  // Liquid Glass: translucent smoked-crystal depth with gliding caustic highlights, cursor-reactive lens glint, and prismatic audio shimmer
+  glass(g, t, dt, x0, x1, W, A) {
+    // subtle translucent violet-indigo optical tint (keeps background translucent so desktop softly bleeds through)
+    const bg = g.createLinearGradient(x0, 0, x1, SKY_H);
+    bg.addColorStop(0, `rgba(124,77,255,${(0.11 + energy * 0.16).toFixed(3)})`);
+    bg.addColorStop(0.5, `rgba(167,139,250,${(0.06 + bass * 0.12).toFixed(3)})`);
+    bg.addColorStop(1, `rgba(224,231,255,${(0.09 + energy * 0.12).toFixed(3)})`);
+    g.globalAlpha = A; g.fillStyle = bg; g.fillRect(x0, 0, W, SKY_H);
+
+    // soft drifting pearlescent light caustics
+    g.globalCompositeOperation = 'lighter';
+    const colors = ['150,115,255', '215,225,255', '120,210,255'];
+    for (let i = 0; i < 3; i++) {
+      const span = W + 140;
+      const cx = x0 - 70 + ((((i * 0.33 * span + t * (0.012 + i * 0.004)) % span) + span) % span);
+      const cy = i === 1 ? 7 : SKY_H - 6;
+      const rad = 28 + (levels[2 + i * 6] || 0) * 34;
+      const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      rg.addColorStop(0, `rgba(${colors[i]},${clamp(0.10 + energy * 0.16 + (i === 1 ? 0.05 : 0), 0, 0.30).toFixed(3)})`);
+      rg.addColorStop(1, `rgba(${colors[i]},0)`);
+      g.globalAlpha = A; g.fillStyle = rg; g.fillRect(cx - rad, 0, rad * 2, SKY_H);
+    }
+
+    // diagonal optical refraction streak sweeping slowly across the crystal surface
+    g.save();
+    g.transform(1, 0, -0.58, 1, 0, 0);
+    const sweepSpan = W + 220;
+    const sx = x0 + ((((t * 0.022) % sweepSpan) + sweepSpan) % sweepSpan) - 90;
+    const streak = g.createLinearGradient(sx, 0, sx + 44, 0);
+    streak.addColorStop(0, 'rgba(255,255,255,0)');
+    streak.addColorStop(0.5, `rgba(240,238,255,${(0.11 + bass * 0.12).toFixed(3)})`);
+    streak.addColorStop(1, 'rgba(255,255,255,0)');
+    g.globalAlpha = A; g.fillStyle = streak; g.fillRect(sx, 0, 44, SKY_H);
+    g.restore();
+
+    // cursor-reactive lens glint along the upper glass bevel
+    if (st.shimmer && st.cx !== undefined) {
+      const r = island.getBoundingClientRect();
+      const relX = clamp(st.cx - r.left, -40, W + 40);
+      const gx = x0 + relX;
+      const lens = g.createRadialGradient(gx, 2, 0, gx, 2, 54);
+      lens.addColorStop(0, 'rgba(255,255,255,0.22)');
+      lens.addColorStop(0.45, 'rgba(196,181,253,0.10)');
+      lens.addColorStop(1, 'rgba(255,255,255,0)');
+      g.globalAlpha = A; g.fillStyle = lens; g.fillRect(gx - 54, 0, 108, SKY_H);
+    }
+
+    // crisp top glass specular arc
+    const topGlint = g.createLinearGradient(x0, 0, x0, 14);
+    topGlint.addColorStop(0, 'rgba(255,255,255,0.18)');
+    topGlint.addColorStop(1, 'rgba(255,255,255,0)');
+    g.globalAlpha = A; g.fillStyle = topGlint; g.fillRect(x0, 0, W, 14);
+  },
+  // Aurora: flowing emerald, cyan and violet northern lights over midnight slate
+  aurora(g, t, dt, x0, x1, W, A) {
+    g.globalAlpha = A; g.fillStyle = '#050b16'; g.fillRect(x0, 0, W, SKY_H);
+    g.globalCompositeOperation = 'lighter';
+    const bands = [
+      { col: '16,185,129', sp: 0.0011, ph: 0.0, y: 14, amp: 7, b: 2 },
+      { col: '34,211,238', sp: -0.0009, ph: 2.1, y: 19, amp: 8, b: 8 },
+      { col: '139,92,246', sp: 0.0014, ph: 4.2, y: 23, amp: 6, b: 14 },
+    ];
+    for (const r of bands) {
+      const lv = levels[r.b] || 0;
+      for (let k = 0; k < 4; k++) {
+        const fx = x0 + ((k + 0.5) / 4) * W + Math.sin(t * r.sp + r.ph + k * 1.4) * (W * 0.14);
+        const fy = r.y + Math.cos(t * 0.0008 + k * 1.9 + r.ph) * r.amp;
+        const rad = 28 + lv * 34 + energy * 16;
+        const rg = g.createRadialGradient(fx, fy, 0, fx, fy, rad);
+        rg.addColorStop(0, `rgba(${r.col},${clamp(0.32 + lv * 0.34, 0, 0.58).toFixed(3)})`);
+        rg.addColorStop(1, `rgba(${r.col},0)`);
+        g.globalAlpha = A; g.fillStyle = rg; g.fillRect(fx - rad, 0, rad * 2, SKY_H);
+      }
+    }
+    drawStars(g, t, dt, x0, x1, W, A * 0.65, 2);
+  },
   // a dark galaxy: clouds of magenta and violet drifting over black, a few stars
   nebula(g, t, dt, x0, x1, W, A) {
     g.globalAlpha = A; g.fillStyle = '#08030f'; g.fillRect(x0, 0, W, SKY_H);
@@ -1174,14 +1270,15 @@ let idleFrames = 0, lastT = 0, lastPaint = 0;
 function frame(t) {
   requestAnimationFrame(frame);
   const playing = st.media.playing && musicOn();
-  const look = st.skin !== 'black' ? st.skin : playing && st.visuals && st.react ? 'sky' : null;      // one theme for everything; plain black gets the night sky while music plays
+  const look = st.skin !== 'black' ? st.skin : playing && st.visuals && st.react ? 'sky' : null;      // plain obsidian gets night sky while music plays; Liquid Glass & animated themes stay active
   if (look !== lookNow) {
     if (look && lookNow) skyA = Math.min(skyA, 0.2);       // one skin gives way to another: fade the new one in
     lookNow = look; applyPal();
   }
   if (look) lookDrawn = look;
   skyA += ((look ? 1 : 0) - skyA) * 0.07;
-  island.classList.toggle('sky', skyA > 0.4);
+  island.classList.toggle('sky', skyA > 0.4 && lookDrawn !== 'glass');
+  document.body.classList.toggle('glass', st.skin === 'glass');
   paintSeek();
   if (!playing && energy < 0.004) {
     if (skyA < 0.01) {
@@ -1196,7 +1293,10 @@ function frame(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t; lastPaint = t;
   sampleLevels(t, playing);
 
-  glow.style.opacity = playing && st.react && (!aura || aura === 'lava') ? (skyA * clamp(0.1 + bass * 0.34, 0, 0.42)).toFixed(3) : 0;
+  const glassRest = st.skin === 'glass' && !st.tucked ? 0.14 : 0;
+  glow.style.opacity = playing && st.react && (!aura || aura === 'lava')
+    ? (skyA * clamp(0.12 + bass * 0.36, 0, 0.44)).toFixed(3)
+    : glassRest.toFixed(3);
   glow.style.transform = `scale(${(1 + bass * 0.1).toFixed(3)}, ${(1 + bass * 0.45).toFixed(3)})`;
   if (st.react) { drawLook(t, dt, playing); drawAura(t, dt, playing); }
   else {            // the theme stays calm: for a moment the painters see silence
@@ -1209,11 +1309,24 @@ function frame(t) {
   if (cur === 'media') {
     const w = barsC.width, h = barsC.height, n = 5, bw = 6, gap = 5, x0 = (w - (n * bw + (n - 1) * gap)) / 2;
     barsG.clearRect(0, 0, w, h);
-    barsG.fillStyle = document.body.classList.contains('daylight') ? '#18222f' : '#fff';
+    if (document.body.classList.contains('daylight')) {
+      barsG.fillStyle = '#18222f';
+      barsG.shadowBlur = 0;
+    } else {
+      const p = (THEMES[lookNow] && THEMES[lookNow].pal) || palette;
+      const bg = barsG.createLinearGradient(0, h, 0, 0);
+      bg.addColorStop(0, p[1] || '#a78bfa');
+      bg.addColorStop(0.55, p[2] || '#e0e7ff');
+      bg.addColorStop(1, '#ffffff');
+      barsG.fillStyle = bg;
+      barsG.shadowColor = p[1] || '#a78bfa';
+      barsG.shadowBlur = playing ? 5 : 0;
+    }
     for (let i = 0; i < n; i++) {
       const v = clamp(levels[1 + i * 4] * 1.5, 0.14, 1), bh = v * (h - 4);
       barsG.beginPath(); barsG.roundRect(x0 + i * (bw + gap), (h - bh) / 2, bw, bh, 3); barsG.fill();
     }
+    barsG.shadowBlur = 0;
   }
 }
 requestAnimationFrame(frame);
@@ -1294,6 +1407,7 @@ function tick() {
   it.textContent = timer.running ? mmss(left) : hm;
   it.classList.toggle('count', timer.running);
   views.idle.classList.toggle('faceon', st.face === 'eyes' && !timer.running);
+  views.idle.classList.toggle('logoon', st.face === 'logo' && !timer.running);
   $('#t-time').textContent = hm;
   const dt = dateText(d), td = $('#t-date');
   if (td.textContent !== dt) td.textContent = dt;
@@ -1794,34 +1908,79 @@ function renderSpeedo() {
   });
 }
 
-// ------------------------------------------------------------ settings, as rows under the pill
-const SETTINGS_UI = [
-  ['button', 'tour', 'What PILLVYN can do', 'Show me'],
-  ['toggle', 'autoStart', 'Start with Windows'],
-  ['toggle', 'autoUpdate', 'Update automatically'],
-  ['seg', 'face', 'Resting pill shows', [['eyes', 'Eyes'], ['clock', 'Clock']]],
-  ['seg', 'calendar', 'Date', [['gregorian', 'Greg.'], ['shamsi', 'Shamsi'], ['shamsi-fa', 'شمسی'], ['both', 'Both']]],
-  ['toggle', 'autoHide', 'Hide while a window is underneath'],
-  ['toggle', 'hideVideo', 'Stay out of the way for videos'],
-  ['swatch', 'skin', 'Theme', ['black', 'nebula', 'crystal', 'ember', 'reactor', 'venom']],        // cloud, water, lava and ice are parked until they are finished
-  ['toggle', 'musicReact', 'Theme reacts to music'],
-  ['toggle', 'visuals', 'Night sky with music (black theme)'],
-  ['step', 'notifSeconds', 'Notification stays for', 2, 10, 's'],
-  ['button', 'dnd', "Hide Windows' own banners", 'Open'],
-  ['toggle', 'copyPreview', 'Show what was copied'],
-  ['toggle', 'clipHistory', 'Clipboard history'],
-  ['toggle', 'deviceAlerts', 'Charger and Bluetooth'],
-  ['toggle', 'downloadAlerts', 'Finished downloads'],
-  ['toggle', 'shelf', 'File shelf'],
-  ['toggle', 'netAlerts', 'Internet and VPN changes'],
-  ['toggle', 'sensorDot', 'Microphone / camera in use'],
-  ['toggle', 'smartCopy', 'Smart copy: links, sums, dates'],
-  ['toggle', 'noteHotkey', 'Ctrl+Alt+N note · Ctrl+Alt+T text grab'],
+// ------------------------------------------------------------ settings: categorized inline studio under the pill
+const SETTINGS_TABS = [
+  ['appearance', 'palette', 'Style'],
+  ['behavior', 'sliders', 'Behavior'],
+  ['features', 'sparkles', 'Tools'],
+  ['about', 'info', 'About'],
 ];
+const SETTINGS_SECTIONS = {
+  appearance: [
+    ['themes', 'skin', 'Theme', SKIN_ORDER],
+    ['seg', 'face', 'Resting pill shows', [['eyes', 'Eyes'], ['clock', 'Clock'], ['logo', 'Logo']]],
+    ['toggle', 'musicReact', 'Theme reacts to music'],
+    ['toggle', 'shimmer', 'Glass shimmer & rim glow'],
+    ['toggle', 'visuals', 'Night sky with music (Obsidian)'],
+  ],
+  behavior: [
+    ['sec', 'Startup & Calendar'],
+    ['toggle', 'autoStart', 'Start with Windows'],
+    ['seg', 'calendar', 'Date', [['gregorian', 'Greg.'], ['shamsi', 'Shamsi'], ['shamsi-fa', 'شمسی'], ['both', 'Both']]],
+    ['sec', 'Visibility & Notifications'],
+    ['toggle', 'autoHide', 'Hide while a window is underneath'],
+    ['toggle', 'hideVideo', 'Stay out of the way for videos'],
+    ['step', 'notifSeconds', 'Notification stays for', 2, 15, 's'],
+    ['button', 'dnd', "Hide Windows' own banners", 'Open'],
+  ],
+  features: [
+    ['sec', 'Clipboard & Files'],
+    ['toggle', 'copyPreview', 'Show what was copied'],
+    ['toggle', 'smartCopy', 'Smart copy: links, sums, dates'],
+    ['toggle', 'clipHistory', 'Clipboard history'],
+    ['toggle', 'shelf', 'File shelf'],
+    ['toggle', 'downloadAlerts', 'Finished downloads'],
+    ['sec', 'System & Shortcuts'],
+    ['toggle', 'deviceAlerts', 'Charger and Bluetooth'],
+    ['toggle', 'netAlerts', 'Internet and VPN changes'],
+    ['toggle', 'sensorDot', 'Microphone / camera in use'],
+    ['toggle', 'noteHotkey', 'Ctrl+Alt+N note · Ctrl+Alt+T text grab'],
+  ],
+  about: [
+    ['aboutCard'],
+    ['toggle', 'autoUpdate', 'Update automatically'],
+  ],
+};
+function ensureSettingsHead() {
+  if (stackHead.dataset.kind === 'settings') {
+    stackHead.querySelectorAll('.set-tab').forEach((bt) => bt.classList.toggle('on', bt.dataset.tab === st.settingsTab));
+    return;
+  }
+  stackHead.textContent = '';
+  stackHead.dataset.kind = 'settings';
+  const wrap = document.createElement('div'); wrap.className = 'set-tabs';
+  for (const [id, icon, text] of SETTINGS_TABS) {
+    const bt = document.createElement('button');
+    bt.className = 'set-tab' + (st.settingsTab === id ? ' on' : '');
+    bt.dataset.tab = id;
+    bt.innerHTML = svg(icon) + '<span>' + text + '</span>';
+    bt.addEventListener('click', () => {
+      st.holdUntil = Math.max(st.holdUntil, Date.now() + 2500);
+      if (st.settingsTab === id) return;
+      st.settingsTab = id;
+      renderStack();
+      stackList.scrollTop = 0;
+    });
+    wrap.appendChild(bt);
+  }
+  stackHead.appendChild(wrap);
+  stackHead.classList.add('on');
+}
 function renderSettings() {
   $('#stack-clear').classList.add('hidden');
+  ensureSettingsHead();
   const s = st.settings || {};
-  if (st.update) {       // a downloaded update is the first thing here, where it can be seen
+  if (st.update) {       // a downloaded update is pinned on top of every tab so it is never missed
     const row = document.createElement('div'); row.className = 'row set sp upd';
     const ic = document.createElement('div'); ic.className = 'ic plain'; ic.innerHTML = svg('download');
     const l = document.createElement('span'); l.className = 'lbl';
@@ -1834,58 +1993,133 @@ function renderSettings() {
     row.append(ic, l, go);
     stackList.appendChild(row);
   }
-  SETTINGS_UI.forEach(([type, key, label, a, b, unit], i) => {
+  const items = SETTINGS_SECTIONS[st.settingsTab] || SETTINGS_SECTIONS.appearance;
+  items.forEach(([type, key, label, a, b, unit], i) => {
+    if (type === 'sec') {
+      const h = document.createElement('div'); h.className = 'set-sec'; h.textContent = key;
+      stackList.appendChild(h);
+      return;
+    }
+    if (type === 'aboutCard') {
+      const card = document.createElement('div'); card.className = 'row set about-card'; card.style.setProperty('--i', 0);
+      const ic = document.createElement('img'); ic.className = 'about-logo'; ic.src = 'icon.png'; ic.alt = 'PILLVYN';
+      const meta = document.createElement('div'); meta.className = 'about-meta';
+      const title = document.createElement('div'); title.className = 'about-title';
+      const name = document.createElement('b'); name.textContent = s.appName || 'PILLVYN';
+      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.1.0');
+      title.append(name, ver);
+      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island for Windows · Glass Edition';
+      meta.append(title, sub);
+      card.append(ic, meta);
+      stackList.appendChild(card);
+
+      const acts = document.createElement('div'); acts.className = 'row set about-acts'; acts.style.setProperty('--i', 1);
+      const tourBt = document.createElement('button'); tourBt.innerHTML = svg('sparkles') + '<span>What PILLVYN can do</span>';
+      tourBt.addEventListener('click', () => setStack(true, 'tour'));
+      const upBt = document.createElement('button');
+      upBt.innerHTML = svg('download') + '<span>' + (st.update ? 'Install ' + st.update : 'Check updates') + '</span>';
+      upBt.addEventListener('click', async () => {
+        if (st.update) { window.pillvyn.updateInstall(); return; }
+        const sp = upBt.querySelector('span'); sp.textContent = 'Checking…';
+        const r = await window.pillvyn.updateCheck();
+        if (r.startsWith('ready')) { st.update = r.slice(6); gearBadge.classList.add('on'); renderStack(); return; }
+        sp.textContent = r === 'none' ? 'Up to date' : 'Could not check';
+      });
+      const ghBt = document.createElement('button'); ghBt.style.flex = '0 0 88px'; ghBt.innerHTML = svg('ext') + '<span>GitHub</span>';
+      ghBt.addEventListener('click', () => window.pillvyn.openUrl('https://github.com/EbramJames/PILLVYN'));
+      acts.append(tourBt, upBt, ghBt);
+      stackList.appendChild(acts);
+      return;
+    }
+    if (type === 'themes') {
+      const now = THEMES[s[key]] ? s[key] : a[0];
+      const box = document.createElement('div'); box.className = 'row set themes-box'; box.style.setProperty('--i', Math.min(i, 6));
+      const hdr = document.createElement('div'); hdr.className = 'themes-hdr';
+      const l = document.createElement('span'); l.className = 'lbl'; l.textContent = label;
+      const n = document.createElement('span'); n.className = 'swn'; n.textContent = (THEMES[now] && THEMES[now].name) || 'Liquid Glass';
+      hdr.append(l, n);
+      const grid = document.createElement('div'); grid.className = 'theme-grid';
+      for (const val of a) {
+        const card = document.createElement('button');
+        card.className = 'theme-card' + (val === now ? ' on' : '');
+        card.dataset.theme = val;
+        card.title = (THEMES[val] && THEMES[val].name) || val;
+        const prev = document.createElement('div'); prev.className = 'theme-prev tp-' + val;
+        const nm = document.createElement('span'); nm.textContent = val === 'glass' ? 'Glass' : ((THEMES[val] && THEMES[val].name) || val);
+        card.append(prev, nm);
+        card.addEventListener('click', () => {
+          triggerSheen();
+          window.pillvyn.setSetting(key, val);
+        });
+        grid.appendChild(card);
+      }
+      box.append(hdr, grid);
+      stackList.appendChild(box);
+      return;
+    }
     const row = document.createElement('div'); row.className = 'row set'; row.style.setProperty('--i', Math.min(i, 6));
     const l = document.createElement('span'); l.className = 'lbl'; l.textContent = label; row.appendChild(l);
     if (type === 'toggle') {
       const on = key === 'autoStart' ? !!s.autoStartOn : s[key] !== false;
-      const sw = document.createElement('button'); sw.className = 'sw' + (on ? ' on' : '');
-      sw.addEventListener('click', () => { sw.classList.toggle('on'); window.pillvyn.setSetting(key, !on); });
+      const sw = document.createElement('button');
+      sw.className = 'sw' + (on ? ' on' : '');
+      sw.setAttribute('role', 'switch');
+      sw.setAttribute('aria-checked', String(on));
+      sw.addEventListener('click', () => {
+        const next = !sw.classList.contains('on');
+        sw.classList.toggle('on', next);
+        sw.setAttribute('aria-checked', String(next));
+        window.pillvyn.setSetting(key, next);
+      });
       row.appendChild(sw);
     } else if (type === 'seg') {
       const seg = document.createElement('div'); seg.className = 'seg';
+      const curVal = s[key] || a[0][0];
       for (const [val, text] of a) {
-        const bt = document.createElement('button'); bt.textContent = text; if ((s[key] || a[0][0]) === val) bt.className = 'on';
+        const bt = document.createElement('button'); bt.textContent = text;
+        if (curVal === val) bt.className = 'on';
         bt.addEventListener('click', () => window.pillvyn.setSetting(key, val));
         seg.appendChild(bt);
       }
       row.appendChild(seg);
-    } else if (type === 'swatch') {
-      const now = s[key] || a[0];
-      const name = document.createElement('span'); name.className = 'dim swn'; name.textContent = now === 'sky' ? 'Cover colours' : now === 'black' ? 'Black' : THEMES[now].name;
-      const box = document.createElement('div'); box.className = 'sws';
-      for (const val of a) {
-        const bt = document.createElement('button'); bt.className = 'sw-' + val + (val === now ? ' on' : '');
-        bt.title = val === 'sky' ? 'Violet night sky' : val === 'black' ? 'Plain black' : THEMES[val].name;
-        bt.addEventListener('click', () => window.pillvyn.setSetting(key, val));
-        box.appendChild(bt);
-      }
-      row.append(name, box);
     } else if (type === 'step') {
       const cur = clamp(Number(s[key]) || a, a, b);
-      const mk = (icon, d) => { const bt = document.createElement('button'); bt.className = 'ib small'; bt.innerHTML = svg(icon); bt.addEventListener('click', () => window.pillvyn.setSetting(key, clamp(cur + d, a, b))); return bt; };
+      const mk = (icon, d) => {
+        const bt = document.createElement('button');
+        bt.className = 'ib small';
+        bt.innerHTML = svg(icon);
+        bt.disabled = (d < 0 && cur <= a) || (d > 0 && cur >= b);
+        bt.addEventListener('click', () => {
+          const live = clamp(Number((st.settings && st.settings[key]) || cur), a, b);
+          window.pillvyn.setSetting(key, clamp(live + d, a, b));
+        });
+        return bt;
+      };
       const num = document.createElement('span'); num.className = 'num'; num.textContent = cur + unit;
       row.append(mk('minus', -1), num, mk('plus', 1));
     } else if (type === 'button') {
-      const bt = document.createElement('button'); bt.className = 'go'; bt.textContent = a; bt.addEventListener('click', () => { if (key === 'tour') setStack(true, 'tour'); else window.pillvyn.action(key); });
+      const bt = document.createElement('button'); bt.className = 'go'; bt.textContent = a;
+      bt.addEventListener('click', () => { if (key === 'tour') setStack(true, 'tour'); else window.pillvyn.action(key); });
       row.appendChild(bt);
     }
     stackList.appendChild(row);
   });
-  const info = document.createElement('div'); info.className = 'row set info';
-  const ic = document.createElement('img'); ic.className = 'brand-ic'; ic.src = 'icon.png'; ic.alt = '';
-  const lbl = document.createElement('span'); lbl.textContent = (s.appName || 'PILLVYN') + ' ' + (s.version || '');
-  info.append(ic, lbl);
-  const up = document.createElement('button'); up.className = 'go'; up.textContent = st.update ? 'Install ' + st.update : 'Check for updates';
-  up.addEventListener('click', async () => {
-    if (st.update) { window.pillvyn.updateInstall(); return; }
-    up.textContent = 'Checking…';
-    const r = await window.pillvyn.updateCheck();
-    if (r.startsWith('ready')) { st.update = r.slice(6); gearBadge.classList.add('on'); renderStack(); return; }
-    else up.textContent = r === 'none' ? 'Up to date' : 'Could not check';
-  });
-  info.appendChild(up);
-  stackList.appendChild(info);
+  if (st.settingsTab !== 'about') {
+    const info = document.createElement('div'); info.className = 'row set info';
+    const ic = document.createElement('img'); ic.className = 'brand-ic'; ic.src = 'icon.png'; ic.alt = '';
+    const lbl = document.createElement('span'); lbl.textContent = (s.appName || 'PILLVYN') + ' ' + (s.version || '');
+    info.append(ic, lbl);
+    const up = document.createElement('button'); up.className = 'go'; up.textContent = st.update ? 'Install ' + st.update : 'Check for updates';
+    up.addEventListener('click', async () => {
+      if (st.update) { window.pillvyn.updateInstall(); return; }
+      up.textContent = 'Checking…';
+      const r = await window.pillvyn.updateCheck();
+      if (r.startsWith('ready')) { st.update = r.slice(6); gearBadge.classList.add('on'); renderStack(); return; }
+      else up.textContent = r === 'none' ? 'Up to date' : 'Could not check';
+    });
+    info.appendChild(up);
+    stackList.appendChild(info);
+  }
 }
 // What PILLVYN can do: one row per feature, under the pill. A click on a row tries the thing itself.
 const TOUR = [
@@ -1898,7 +2132,7 @@ const TOUR = [
   ['clipboard', 'Clipboard history', 'Everything you copied, with images and pins', 'clips'],
   ['key', 'Passwords', 'Makes one, asks what it is for, keeps it encrypted', 'vault'],
   ['timer', 'Timer', 'Stays in sight while it runs', 'timer'],
-  ['gear', 'Themes and settings', 'Liquid skins, Venom, and every switch', 'settings'],
+  ['gear', 'Themes and settings', 'Liquid Glass, Aurora, Venom, and categorized studio', 'settings'],
 ];
 function renderTour() {
   $('#stack-clear').classList.add('hidden');
@@ -1947,12 +2181,14 @@ const blink = () => emote('blink', 130);
   }
   setTimeout(faceLoop, 1700 + Math.random() * 3600);
 })();
-// the eyes follow the cursor a little when it comes near
+// the eyes and glass rim glint follow the cursor when it comes near
 window.pillvyn.onCursor(({ x, y }) => {
   const dx = x - window.innerWidth / 2, dy = y - 26, d = Math.hypot(dx, dy);
   const k = d < 420 && d > 1 ? Math.min(1, d / 120) : 0;
   face.style.setProperty('--lx', (k ? dx / d * 2.4 * k : 0).toFixed(2) + 'px');
   face.style.setProperty('--ly', (k ? dy / d * 1.6 * k : 0).toFixed(2) + 'px');
+  const r = island.getBoundingClientRect();
+  if (r.width > 0) island.style.setProperty('--mx', clamp(((x - r.left) / r.width) * 100, 0, 100).toFixed(1) + '%');
 });
 
 // ------------------------------------------------------------ boot
@@ -1965,13 +2201,16 @@ const applySettings = (s) => {
   st.deviceAlerts = s.deviceAlerts !== false;
   st.shelfOn = s.shelf !== false;
   st.visuals = s.visuals !== false;
-  st.skin = ['nebula', 'crystal', 'ember', 'reactor', 'venom'].includes(s.skin) ? s.skin : 'black';
+  st.skin = SKIN_ORDER.includes(s.skin) ? s.skin : 'glass';
   st.musicTheme = THEMES[s.musicTheme] ? s.musicTheme : 'sky';
   st.smartCopy = s.smartCopy !== false;
   st.react = s.musicReact !== false;
+  st.shimmer = s.shimmer !== false;
+  document.body.classList.toggle('glass', st.skin === 'glass');
+  document.body.classList.toggle('shimmer-off', !st.shimmer);
   if (s.netAlerts === false) { st.net = { online: true, vpn: '', proxy: false }; paintStatus(); }
   st.calendar = CALENDARS.includes(s.calendar) ? s.calendar : 'gregorian';
-  st.face = s.face === 'clock' ? 'clock' : 'eyes';
+  st.face = ['eyes', 'clock', 'logo'].includes(s.face) ? s.face : 'eyes';
   st.settings = s; st.lastUser = s.lastUser || '';
   st.gen.len = Number(s.vaultLength) || 18; st.gen.symbols = s.vaultSymbols !== false;
   if (st.stackOpen && st.stackKind === 'settings') { const y = stackList.scrollTop; renderStack(); stackList.scrollTop = y; }
@@ -2103,5 +2342,5 @@ window.pillvyn.onDownload((d) => {
 window.pillvyn.onSettings(applySettings);
 window.pillvyn.getSettings().then(applySettings);
 paintVol(); tick(); updateBadge(); paintStatus(); render();
-window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
+window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
 })();
