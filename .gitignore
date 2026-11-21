@@ -29,4 +29,5 @@ npm-debug.log*
 *.pem
 /.claude/
 docs/bug/
+docs/branding/logo v2.png
 !src-tauri/icons/**
