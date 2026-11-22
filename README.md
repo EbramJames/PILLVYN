@@ -19,23 +19,24 @@ catches your notifications, remembers what you copied, holds your files, and ada
 
 [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [فارسی](#فارسی)
 
-<img src="docs/hero.jpg" width="860" alt="PILLVYN v3.1.0 Liquid Glass Dynamic Island for Windows">
+<img src="docs/hero.jpg" width="860" alt="PILLVYN v3.2.0 Studio Edition Dynamic Island for Windows">
 
 </div>
 
 ## What it does
 
-- **Liquid Glass & Dynamic Themes.** Translucent frosted glass-morphism (`Liquid Glass`) with optical specular highlights, cursor-reactive rim light, state-change shimmer sweeps, and audio-reactive dispersion — alongside **Obsidian**, **Nebula**, **Aurora**, **Sapphire**, **Ember**, **Reactor**, and **Venom**.
-- **Now playing.** Title, artist, album art, gradient audio visualizer bars, transport controls, and an interactive hover scrubber for Windows media sessions. Films and fullscreen games are left alone.
-- **Categorized Settings Studio inside the island.** Clean **Style**, **Behavior**, **Tools**, and **About** tabs with a visual 4×2 Theme Gallery and resting pill styles (**Eyes**, **Clock**, or **Logo**) — zero extra windows.
-- **Notifications in one line.** Click to open that chat. While you are using the pill, incoming alerts wait neatly beside it instead of interrupting.
-- **One hover away.** Screenshot, text grab, clipboard history, quick note, passwords, timer, file shelf, notifications, and settings.
+- **Studio-Grade Glass & Atmospheric Themes.** Translucent dark **Liquid Glass** (`glass`) and bright daylight **Frosted Pearl** (`frost`) with optical specular edges, drifting caustics, and cursor-reactive rim light — alongside **Obsidian**, **Aurora**, **Nebula**, **Sapphire**, **Amber Horizon**, and **Venom**, each with cohesive themed dropdown surfaces.
+- **Effortless Interactions.** Hover or click the resting pill for instant tools with floating shortcut tooltips, right-click the pill to jump straight into **Settings Studio**, press `Esc` to dismiss open panels, and drag or scroll the interactive volume slider.
+- **Now playing.** Title, artist, album art with dynamic cover-accent glow, gradient audio visualizer bars, transport controls, and an interactive hover scrubber for Windows media sessions. Films and fullscreen games are left alone.
+- **Categorized Settings Studio inside the island.** Clean **Style**, **Behavior**, **Tools**, and **About** tabs with a visual 4×2 Theme Gallery, live top-edge offset (`0–24px`), optional UI micro-acoustics, and resting pill styles (**Eyes**, **Clock**, or **Logo**) — zero extra windows.
+- **Notifications in one line.** Click to open that chat, accompanied by a gentle chime. While you are using the pill, incoming alerts wait neatly beside it instead of interrupting.
+- **Focus Timer with presets.** One-click `5m` / `15m` / `25m` chips, scroll-wheel minute adjustment, and a live bottom countdown progress bar that stays visible while running.
 - **Smart copy.** Copied links open in one click, math expressions show their answer, dates convert Gregorian ⇄ Shamsi, and hex colours preview their swatch.
 - **File shelf.** Drop up to five files onto the pill and drag them back out whenever you need them.
 - **Quick notes & reminders.** `Ctrl+Alt+N` from anywhere (`call Ali in 20m`, `at 18:30 gym`, «۱۰ دقیقه دیگه چای»).
 - **Encrypted passwords.** Generate and store credentials protected with your Windows account (DPAPI); copied passwords clear from the clipboard after 30 seconds.
 - **Offline text grab (OCR).** `Ctrl+Alt+T`, drag a box over any screen region to copy English (Windows OCR) or Persian (bundled Tesseract). Everything stays local.
-- **Small signs.** Subtle dots while the microphone or camera is active, VPN/network transitions, Bluetooth & charger alerts, and a persistent countdown timer.
+- **Small signs & synchronized tray.** Subtle dots while the microphone or camera is active, VPN/network transitions, Bluetooth & charger alerts, and a full system tray menu for quick note, OCR, tour, and live-synced startup toggle.
 - **Verified self-updates.** Releases download from GitHub Releases and verify their SHA-256 checksum before installing silently.
 
 On its first start PILLVYN greets you and offers *What PILLVYN can do* (always accessible under **Settings → About**).
@@ -85,9 +86,10 @@ Icons can be regenerated anytime from master artwork with `scripts/generate-icon
 
 ### امکانات
 
-- **تم شیشه‌ای (Liquid Glass) و تم‌های متحرک:** نمای نیمه‌شفاف شیشه‌ای با انعکاس نور در لبه‌ها و واکنش به مکان‌نما، به‌همراه تم‌های **Obsidian**، **Nebula**، **Aurora**، **Sapphire**، **Ember**، **Reactor** و **Venom**.
-- **تنظیمات دسته‌بندی‌شده داخل خود جزیره:** چهار تب منظم (**Style**، **Behavior**، **Tools**، **About**) با گالری تصویری تم‌ها و انتخاب حالت استراحت جزیره (**Eyes**، **Clock** یا **Logo**).
-- **پخش موزیک:** نام آهنگ، خواننده، کاور، اکولایزر گرادیانی زنده، دکمه‌های کنترل و نوار جلو و عقب بردن. با فیلم و بازی تمام‌صفحه کاری ندارد.
+- **تم‌های شیشه‌ای (Liquid Glass و Frosted Pearl) و تم‌های استودیویی:** تم شیشه‌ای تیره (**Liquid Glass**) و تم شیشه‌ای روشن (**Frosted Pearl**) با انعکاس نور در لبه‌ها و واکنش به مکان‌نما، به‌همراه **Obsidian**، **Aurora**، **Nebula**، **Sapphire**، **Amber Horizon** و **Venom**.
+- **تعامل سریع و روان:** کلیک روی جزیره برای باز شدن فوری ابزارها، تولتیپ شناور با نمایش میانبرها، راست‌کلیک برای باز کردن مستقیم تنظیمات، اسلایدر قابل‌کشیدن برای تنظیم صدا و تایمر با کلیدهای سریع ۵، ۱۵ و ۲۵ دقیقه.
+- **تنظیمات دسته‌بندی‌شده داخل خود جزیره:** چهار تب منظم (**Style**، **Behavior**، **Tools**، **About**) با گالری تصویری تم‌ها، تنظیم فاصله از بالای صفحه (`0–24px`)، افکت‌های صوتی ظریف و انتخاب حالت استراحت جزیره (**Eyes**، **Clock** یا **Logo**).
+- **پخش موزیک:** نام آهنگ، خواننده، کاور با هالهٔ رنگی هماهنگ با کاور، اکولایزر گرادیانی زنده، دکمه‌های کنترل و نوار جلو و عقب بردن. با فیلم و بازی تمام‌صفحه کاری ندارد.
 - **نوتیفیکیشن در یک خط:** با کلیک همان چت باز می‌شود؛ هنگام کار با جزیره کنار آن منتظر می‌ماند.
 - **کپی هوشمند:** لینک‌ها باز می‌شوند، عبارات ریاضی حساب می‌شوند، تاریخ میلادی و شمسی به هم تبدیل می‌شوند و کد رنگ‌ها نمایش داده می‌شوند.
 - **نگه‌داشتن فایل:** فایل را روی جزیره رها کن تا کنار هم بمانند و هر وقت خواستی بیرونشان بکشی.

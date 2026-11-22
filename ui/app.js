@@ -78,10 +78,10 @@ const st = {
   dragOut: false,                                  // a shelf file is being dragged out right now
   hudUntil: 0,                                     // short status line (copied / charger / Bluetooth / files held)
   shelf: [], dragAt: 0,                            // files parked on the pill; dragAt = a file is being dragged over it
-  scrubbing: false,
+  scrubbing: false, volDrag: false,
   volUntil: 0, volSeen: false, vol: 50, mute: false, volLocalAt: 0,
   media: { active: false, playing: false, title: '', artist: '', pos: 0, dur: 0, at: 0, key: '', video: false },
-  pausedAt: 0, force: null,
+  pausedAt: 0, force: null, coverPal: null,
   // menu mode: while music plays the pill behaves like the normal clock/menu instead of the player,
   // and stays that way until the user switches back to the track
   menuMode: false,
@@ -97,16 +97,16 @@ const st = {
   gen: { pass: '', len: 18, symbols: true },
   skin: 'glass', musicTheme: 'sky',                // what the pill wears at rest / while music plays
   net: { online: true, vpn: '', proxy: false }, sensors: { mic: [], cam: [] },
-  smartCopy: true, hudAct: null, muteClipUntil: 0, react: true, shimmer: true, settingsTab: 'appearance',
+  smartCopy: true, hudAct: null, muteClipUntil: 0, react: true, shimmer: true, sounds: true, settingsTab: 'appearance',
 };
 // the window takes the mouse only while the cursor is on the island (or a text field is open)
 let mouseSent = null;
 function syncMouse(force) {
-  const want = st.hover || (st.typing && !st.parked) || st.dragOut;
+  const want = st.hover || (st.typing && !st.parked) || st.dragOut || st.volDrag;
   if (force || want !== mouseSent) { mouseSent = want; window.pillvyn.setInteractive(want); }
 }
 setInterval(() => syncMouse(true), 500);      // repeated, so one lost message can never leave the pill unclickable
-const timer = { left: 25 * 60000, endAt: 0, running: false, done: false };
+const timer = { left: 25 * 60000, total: 25 * 60000, endAt: 0, running: false, done: false };
 const views = Object.fromEntries($$('.view').map((v) => [v.dataset.view, v]));
 let cur = 'idle';
 
@@ -135,20 +135,21 @@ function updateTuck() {
   const want = !st.force && (st.full || (st.autoHide && st.covered));
   // dwelling on the very top edge of the screen peeks the island back out
   if (want && st.tucked && st.peekSince && now - st.peekSince > 220) { st.revealUntil = now + 1400; st.peekSince = 0; }
-  const reveal = st.notif || now < st.volUntil || now < st.hudUntil || dragging() || st.dragOut || st.scrubbing || st.hover || st.typing || timer.running || (st.shelfOn && st.shelf.length && !st.full) || st.stackOpen || st.manual === 'gen' || now < st.revealUntil || now < st.holdUntil || (!st.tucked && now - st.leftAt < 900);   // a running timer stays on screen, fullscreen or not
+  const reveal = st.notif || now < st.volUntil || now < st.hudUntil || dragging() || st.dragOut || st.scrubbing || st.volDrag || st.hover || st.typing || timer.running || (st.shelfOn && st.shelf.length && !st.full) || st.stackOpen || st.manual === 'gen' || now < st.revealUntil || now < st.holdUntil || (!st.tucked && now - st.leftAt < 900);   // a running timer stays on screen, fullscreen or not
   const tucked = !!(want && !reveal);
   island.classList.toggle('full', st.full);
   if (tucked !== st.tucked) {
     st.tucked = tucked;
     island.classList.toggle('tucked', tucked);
     glow.classList.toggle('off', tucked);
+    if (tucked) hideTip();
     if (tucked && st.hover) { st.hover = false; island.classList.remove('hover'); syncMouse(); }
     if (!tucked) evalHover(st.cx, st.cy);    // the cursor may already be resting where the pill lands
   }
 }
 function render() {
   // nothing closes while a file is on its way out, while typing, or right after it was opened from the tray / a shortcut
-  const now = Date.now(), away = !st.hover && !st.dragOut && !st.typing && now > st.holdUntil;
+  const now = Date.now(), away = !st.hover && !st.dragOut && !st.volDrag && !st.typing && now > st.holdUntil;
   // the password list and a fresh password stay until the user closes them: they are used together with another window
   if (st.stackOpen && st.stackKind !== 'vault' && away && now - st.leftAt > 650) setStack(false);
   if (away && !st.stackOpen && now - st.leftAt > 380 && st.manual !== 'gen') st.manual = null;
@@ -166,7 +167,9 @@ function render() {
     views[cur].classList.remove('on');
     views[v].classList.add('on');
     cur = v;
+    if (cur !== 'tools') hideTip();
   }
+  if (!st.hover || st.stackOpen) hideTip();
   const w = clamp(Math.ceil(views[cur].offsetWidth), 70, 600);
   if (island.dataset.w !== String(w)) {
     island.dataset.w = w;
@@ -218,7 +221,7 @@ window.pillvyn.onPress(({ x, y }) => {
     if (target) { if (target.tagName === 'INPUT') target.focus(); else target.click(); }
   }, 260);
 });
-window.pillvyn.onRelease(() => { setTimeout(() => { if (st.scrubbing) endScrub(true); }, 120); });   // a scrub whose mouse-up went elsewhere
+window.pillvyn.onRelease(() => { setTimeout(() => { if (st.scrubbing) endScrub(true); if (st.volDrag) endVolDrag(null); }, 120); });   // a scrub whose mouse-up went elsewhere
 
 function triggerSheen() {
   if (!st.shimmer || st.tucked || !sheen) return;
@@ -227,6 +230,90 @@ function triggerSheen() {
   sheen.classList.add('go');
 }
 function bump() { island.classList.remove('bump'); void island.offsetWidth; island.classList.add('bump'); triggerSheen(); }
+
+// Subtle Web Audio micro-acoustics (optional, gated by st.sounds)
+let ac = null;
+function chime(kind) {
+  if (!st.sounds && kind !== 'done') return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!ac) ac = new AC();
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    const now = ac.currentTime;
+    const tone = (freq, start, dur, peak, type = 'sine', endFreq = null) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, now + start);
+      if (endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, now + start + dur);
+      g.gain.setValueAtTime(0.0001, now + start);
+      g.gain.exponentialRampToValueAtTime(peak, now + start + Math.min(0.014, dur * 0.3));
+      g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+      o.connect(g).connect(ac.destination);
+      o.start(now + start); o.stop(now + start + dur + 0.02);
+    };
+    if (kind === 'tick') {
+      tone(920, 0, 0.042, 0.026, 'sine', 1240);
+    } else if (kind === 'notif') {
+      tone(784, 0, 0.17, 0.036, 'sine');
+      tone(1174.7, 0.045, 0.22, 0.028, 'triangle');
+    } else if (kind === 'drop') {
+      tone(523.25, 0, 0.11, 0.034, 'sine', 659.25);
+    } else if (kind === 'done') {
+      [[880, 0], [1174.7, 0.18], [1318.5, 0.36], [880, 0.85], [1174.7, 1.03], [1568, 1.22]].forEach(([f, t]) => {
+        tone(f, t, 0.22, 0.14, 'sine');
+      });
+    }
+  } catch { /* no audio device */ }
+}
+
+// Floating micro-tooltip for hovered toolbar buttons (never intercepts clicks)
+const tipEl = $('#tip');
+let tipT = 0;
+function hideTip() {
+  clearTimeout(tipT);
+  if (tipEl) tipEl.classList.remove('on');
+}
+function showTip(el) {
+  if (!tipEl || !el || !el.dataset.tip || st.stackOpen || st.tucked) return;
+  tipEl.textContent = '';
+  tipEl.appendChild(document.createTextNode(el.dataset.tip));
+  if (el.dataset.key) {
+    const k = document.createElement('span'); k.className = 'tk'; k.textContent = el.dataset.key;
+    tipEl.appendChild(k);
+  }
+  const r = el.getBoundingClientRect();
+  const cx = clamp(r.left + r.width / 2, 74, window.innerWidth - 74);
+  tipEl.style.left = Math.round(cx) + 'px';
+  tipEl.classList.add('on');
+}
+$$('#island [data-tip]').forEach((el) => {
+  el.addEventListener('mouseenter', () => {
+    clearTimeout(tipT);
+    if (st.stackOpen || st.tucked) return;
+    tipT = setTimeout(() => showTip(el), 110);
+  });
+  el.addEventListener('mouseleave', hideTip);
+  el.addEventListener('pointerdown', hideTip);
+});
+
+// Direct resting-pill click, right-click Settings Studio & Escape to dismiss open stack
+views.idle.addEventListener('click', () => {
+  st.manual = 'tools'; st.enteredAt = 0;
+  triggerSheen(); emote('wink', 320); chime('tick'); render();
+});
+island.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  hideTip();
+  st.holdUntil = Date.now() + 8000;
+  setStack(!(st.stackOpen && st.stackKind === 'settings'), 'settings');
+  chime('tick');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && st.stackOpen && !st.typing && document.activeElement !== $('#v-search')) {
+    e.preventDefault();
+    setStack(false);
+  }
+});
 let flashT = 0;
 function flash(text, color) {
   const f = $('#flash');
@@ -343,7 +430,7 @@ function nextNotif() {
   box.firstElementChild.textContent = body;
   box.classList.toggle('empty', !body);
   st.notif = n;
-  bump(); render();
+  bump(); if (!n.silent) chime('notif'); render();
   startMarquee(box, true);                 // long text travels while it is up, but never keeps the notification up
   const base = st.notifMs || 4000;
   st.notifEndsAt = Date.now() + (n.long ? Math.max(base, 8000) : st.queue.length ? Math.min(base, 2800) : base);
@@ -506,6 +593,7 @@ function setStack(open, kind) {
   if (open && kind === 'vault') window.pillvyn.vaultList().then(setVault);
   island.classList.remove('hover');
   if (open) {
+    hideTip();
     st.manual = 'tools';
     if (kind === 'notifs') { st.unseen = 0; updateBadge(); }
     renderStack();
@@ -611,7 +699,7 @@ document.addEventListener('drop', async (e) => {
   for (const u of urls.slice(0, 5)) list = await window.pillvyn.shelfAddUrl(u);
   setShelf(list); bump();
   const added = list.length - before;
-  if (added > 0) showHud('tray', added === 1 ? 'Holding' : 'Holding ' + added + ' files', added === 1 ? list[list.length - 1].name : 'drag them out from here', 1900);
+  if (added > 0) { chime('drop'); showHud('tray', added === 1 ? 'Holding' : 'Holding ' + added + ' files', added === 1 ? list[list.length - 1].name : 'drag them out from here', 1900); }
   else showHud('tray', "Can't hold that", 'only files and pictures', 2000, 'faded');
 });
 // While a file is on its way out, the pill and the list stay exactly as they are.
@@ -627,36 +715,83 @@ $('#t-shelf').addEventListener('dragstart', (e) => { e.preventDefault(); window.
 
 // ------------------------------------------------------------ media
 const DEFAULT_PAL = ['#1f0e6b', '#33199a', '#4c2cbf'];     // dark violet night sky (deep enough that white text stays easy to read)
-// Skins: animated surfaces the pill can wear. At rest they move slowly; with music they react to the sound.
-const SKIN_ORDER = ['glass', 'black', 'nebula', 'aurora', 'crystal', 'ember', 'reactor', 'venom'];
+// Skins: studio-grade animated surfaces the pill can wear. At rest they move slowly; with music they react to the sound.
+const SKIN_ORDER = ['glass', 'frost', 'black', 'aurora', 'nebula', 'crystal', 'solar', 'venom'];
 const THEMES = {
-  glass: { name: 'Liquid Glass', pal: ['#7c4dff', '#a78bfa', '#e0e7ff'] },
-  black: { name: 'Obsidian', pal: ['#7c4dff', '#a78bfa', '#c4b5fd'] },
-  nebula: { name: 'Nebula', pal: ['#7a1fd1', '#c0269a', '#ff4f9a'] },
-  aurora: { name: 'Aurora', pal: ['#10b981', '#22d3ee', '#8b5cf6'] },
-  crystal: { name: 'Sapphire', pal: ['#2b36d9', '#5a48f0', '#9a6bff'] },
-  ember: { name: 'Ember', pal: ['#a8081d', '#dc1230', '#ff4a3d'] },
-  reactor: { name: 'Reactor', pal: ['#2f8f12', '#6fd61f', '#b6ff3a'] },
-  venom: { name: 'Venom', pal: ['#3a3d47', '#8a8f9c', '#e6eaf2'] },
-  cloud: { name: 'Storm cloud', pal: ['#7f93b3', '#b9c8e0', '#ffffff'] },
-  water: { name: 'Water', pal: ['#0b5fd6', '#1aa6e8', '#5fe0e6'] },
-  lava: { name: 'Lava', pal: ['#e02a0c', '#ff7a18', '#ffd24a'] },
-  ice: { name: 'Ice', pal: ['#5aa9e6', '#9fd3f7', '#e9f6ff'] },
+  glass: { name: 'Liquid Glass', short: 'Glass', pal: ['#7c4dff', '#a78bfa', '#e0e7ff'] },
+  frost: { name: 'Frosted Pearl', short: 'Frost', pal: ['#4f46e5', '#6366f1', '#94a3b8'] },
+  black: { name: 'Obsidian', short: 'Obsidian', pal: ['#7c4dff', '#a78bfa', '#c4b5fd'] },
+  aurora: { name: 'Aurora', short: 'Aurora', pal: ['#10b981', '#22d3ee', '#8b5cf6'] },
+  nebula: { name: 'Nebula', short: 'Nebula', pal: ['#7a1fd1', '#c0269a', '#ff4f9a'] },
+  crystal: { name: 'Sapphire', short: 'Sapphire', pal: ['#2563eb', '#6366f1', '#93c5fd'] },
+  solar: { name: 'Amber Horizon', short: 'Solar', pal: ['#c2410c', '#f59e0b', '#fde68a'] },
+  venom: { name: 'Venom', short: 'Venom', pal: ['#3a3d47', '#8a8f9c', '#e6eaf2'] },
+  ember: { name: 'Ember', short: 'Ember', pal: ['#a8081d', '#dc1230', '#ff4a3d'] },
+  reactor: { name: 'Reactor', short: 'Reactor', pal: ['#2f8f12', '#6fd61f', '#b6ff3a'] },
+  cloud: { name: 'Storm cloud', short: 'Cloud', pal: ['#7f93b3', '#b9c8e0', '#ffffff'] },
+  water: { name: 'Water', short: 'Water', pal: ['#0b5fd6', '#1aa6e8', '#5fe0e6'] },
+  lava: { name: 'Lava', short: 'Lava', pal: ['#e02a0c', '#ff7a18', '#ffd24a'] },
+  ice: { name: 'Ice', short: 'Ice', pal: ['#5aa9e6', '#9fd3f7', '#e9f6ff'] },
 };
 const palette = DEFAULT_PAL;
-let lookNow = null, lookDrawn = 'sky';
-function applyPal() {       // the accent colours (glow, switches) follow whatever the pill is wearing
-  const p = THEMES[lookNow] ? THEMES[lookNow].pal : palette;
+let lookNow = null, lookDrawn = 'sky', cloudOn = false, iceOn = false, storm = 0;
+function syncDaylight() {
+  const on = st.skin === 'frost' || (cloudOn && storm < 0.5) || iceOn;
+  document.body.classList.toggle('daylight', on);
+}
+function syncSurfaceClasses() {
+  const b = document.body.classList;
+  b.toggle('glass', st.skin === 'glass');
+  b.toggle('frost', st.skin === 'frost');
+  b.toggle('theme-aurora', st.skin === 'aurora');
+  b.toggle('theme-nebula', st.skin === 'nebula');
+  b.toggle('theme-crystal', st.skin === 'crystal');
+  b.toggle('theme-solar', st.skin === 'solar');
+  syncDaylight();
+}
+function applyPal() {       // the accent colours (glow, switches, seek bar) follow the theme — and whisper cover art while playing
+  const useCover = st.coverPal && musicOn() && (st.skin === 'glass' || st.skin === 'black');
+  const p = useCover ? st.coverPal : (THEMES[lookNow] ? THEMES[lookNow].pal : (THEMES[st.skin] ? THEMES[st.skin].pal : palette));
   const r = document.documentElement.style;
   r.setProperty('--c1', p[0]); r.setProperty('--c2', p[1]); r.setProperty('--c3', p[2]);
 }
-// The sky is always this violet, whatever the cover looks like (a cover's colours once turned it brown or gold).
+// Extract a vibrant accent trio from album artwork without letting dull browns or grays muddy the pill
+const artProbe = document.createElement('canvas'); artProbe.width = 8; artProbe.height = 8;
+const artProbeG = artProbe.getContext('2d', { willReadFrequently: true });
+function extractCoverAccent(img) {
+  try {
+    artProbeG.clearRect(0, 0, 8, 8);
+    artProbeG.drawImage(img, 0, 0, 8, 8);
+    const data = artProbeG.getImageData(0, 0, 8, 8).data;
+    let best = null, bestScore = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), sat = max ? (max - min) / max : 0;
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      if (lum < 0.14 || lum > 0.92 || sat < 0.22) continue;
+      const score = sat * (1 - Math.abs(lum - 0.54));
+      if (score > bestScore) { bestScore = score; best = [r, g, b]; }
+    }
+    if (!best) return null;
+    const hex = (r, g, b) => '#' + [r, g, b].map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
+    const [r, g, b] = best;
+    return [
+      hex(r * 0.65, g * 0.65, b * 0.65),
+      hex(Math.min(255, r * 1.08 + 18), Math.min(255, g * 1.08 + 18), Math.min(255, b * 1.08 + 18)),
+      hex(r + (255 - r) * 0.55, g + (255 - g) * 0.55, b + (255 - b) * 0.55),
+    ];
+  } catch { return null; }
+}
 function setArt(b64) {
   const art = $('#art');
-  if (!b64) { art.style.backgroundImage = ''; art.innerHTML = svg('note'); return; }
+  if (!b64) { art.style.backgroundImage = ''; art.innerHTML = svg('note'); st.coverPal = null; applyPal(); return; }
   const url = `data:image/png;base64,${b64}`;
   const img = new Image();
-  img.onload = () => { art.style.backgroundImage = `url(${url})`; art.innerHTML = ''; };
+  img.onload = () => {
+    art.style.backgroundImage = `url(${url})`; art.innerHTML = '';
+    st.coverPal = extractCoverAccent(img);
+    applyPal();
+  };
   img.onerror = () => setArt(null);
   img.src = url;
 }
@@ -682,6 +817,7 @@ function onMedia(m) {
   setIcon($('#b-play'), icon); setIcon($('#t-play'), icon);
   $('#t-play').classList.toggle('hidden', !st.media.active);
   $('#t-track').classList.toggle('hidden', !(st.menuMode && musicOn()));
+  applyPal();
   render();
 }
 function setMenuMode(on) {
@@ -705,17 +841,57 @@ $('#b-more').addEventListener('click', () => setMenuMode(true));
 $('#t-track').addEventListener('click', () => { setStack(false); setMenuMode(false); });
 setArt(null);
 
-// ------------------------------------------------------------ volume HUD (scroll on the pill, or any system volume change)
+// ------------------------------------------------------------ volume HUD (scroll on the pill, drag slider, or any system volume change)
 function paintVol() {
-  $('#v-fill').style.width = (st.mute ? 0 : st.vol) + '%';
-  $('#v-num').textContent = st.mute ? '0' : st.vol;
+  const pct = st.mute ? 0 : st.vol;
+  $('#v-fill').style.width = pct + '%';
+  const knob = $('#v-knob');
+  if (knob) knob.style.left = pct + '%';
+  $('#v-num').textContent = String(pct);
   const ic = st.mute || st.vol === 0 ? 'muted' : 'volume';
-  setIcon($('#v-icon'), ic);
+  setIcon($('#v-mute'), ic);
 }
-views.vol.addEventListener('click', () => { st.volUntil = Date.now() + 1500; window.pillvyn.toggleMute(); });
+$('#v-mute').addEventListener('click', (e) => {
+  e.stopPropagation();
+  st.volUntil = Date.now() + 1800;
+  window.pillvyn.toggleMute();
+  chime('tick');
+});
+const vBar = $('#v-bar');
+let volSendT = 0;
+function applyVolFromPointer(e, immediate) {
+  const r = vBar.getBoundingClientRect();
+  if (!r.width) return;
+  st.vol = Math.round(clamp((e.clientX - r.left) / r.width, 0, 1) * 100);
+  st.mute = false;
+  st.volLocalAt = Date.now();
+  st.volUntil = Date.now() + 1800;
+  paintVol(); render();
+  if (immediate) {
+    clearTimeout(volSendT); volSendT = 0;
+    window.pillvyn.setVolume(st.vol / 100);
+  } else if (!volSendT) {
+    volSendT = setTimeout(() => { volSendT = 0; window.pillvyn.setVolume(st.vol / 100); }, 45);
+  }
+}
+vBar.addEventListener('pointerdown', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  try { vBar.setPointerCapture(e.pointerId); } catch { /* pointer gone */ }
+  st.volDrag = true; vBar.classList.add('drag'); syncMouse();
+  applyVolFromPointer(e, false);
+});
+vBar.addEventListener('pointermove', (e) => { if (st.volDrag) applyVolFromPointer(e, false); });
+function endVolDrag(e) {
+  if (!st.volDrag) return;
+  if (e && e.clientX !== undefined) applyVolFromPointer(e, true);
+  st.volDrag = false; vBar.classList.remove('drag');
+  st.leftAt = Date.now(); syncMouse();
+}
+vBar.addEventListener('pointerup', endVolDrag);
+vBar.addEventListener('pointercancel', () => endVolDrag(null));
 // The pill is the source of truth while scrolling: steps are applied locally at once, sent to Windows at most
 // ~16 times a second, and Windows' own (late) reports are ignored until the wheel has rested.
-let wheelAcc = 0, volSendT = 0;
+let wheelAcc = 0;
 island.addEventListener('wheel', (e) => {
   e.preventDefault();
   wheelAcc += e.deltaY;
@@ -964,6 +1140,78 @@ const PAINT = {
     topGlint.addColorStop(1, 'rgba(255,255,255,0)');
     g.globalAlpha = A; g.fillStyle = topGlint; g.fillRect(x0, 0, W, 14);
   },
+  // Frosted Pearl: airy daylight glass-morphism with soft iridescent sky/lavender caustics and bright prism gleam
+  frost(g, t, dt, x0, x1, W, A) {
+    const bg = g.createLinearGradient(x0, 0, x1, SKY_H);
+    bg.addColorStop(0, `rgba(255,255,255,${(0.32 + energy * 0.14).toFixed(3)})`);
+    bg.addColorStop(0.5, `rgba(224,234,255,${(0.24 + bass * 0.12).toFixed(3)})`);
+    bg.addColorStop(1, `rgba(237,233,254,${(0.30 + energy * 0.12).toFixed(3)})`);
+    g.globalAlpha = A; g.fillStyle = bg; g.fillRect(x0, 0, W, SKY_H);
+
+    // pastel optical caustics drifting gently across the frosted pearl glass
+    const tints = ['129,140,248', '56,189,248', '244,114,182'];
+    for (let i = 0; i < 3; i++) {
+      const span = W + 140;
+      const cx = x0 - 70 + ((((i * 0.34 * span + t * (0.01 + i * 0.003)) % span) + span) % span);
+      const cy = i === 1 ? SKY_H - 6 : 8;
+      const rad = 28 + (levels[3 + i * 5] || 0) * 32;
+      const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      rg.addColorStop(0, `rgba(${tints[i]},${clamp(0.11 + energy * 0.16, 0, 0.28).toFixed(3)})`);
+      rg.addColorStop(1, `rgba(${tints[i]},0)`);
+      g.globalAlpha = A; g.fillStyle = rg; g.fillRect(cx - rad, 0, rad * 2, SKY_H);
+    }
+
+    // diagonal pearl specular sweep
+    g.save();
+    g.transform(1, 0, -0.58, 1, 0, 0);
+    const sweepSpan = W + 220;
+    const sx = x0 + ((((t * 0.020) % sweepSpan) + sweepSpan) % sweepSpan) - 90;
+    const streak = g.createLinearGradient(sx, 0, sx + 48, 0);
+    streak.addColorStop(0, 'rgba(255,255,255,0)');
+    streak.addColorStop(0.5, `rgba(255,255,255,${(0.42 + bass * 0.16).toFixed(3)})`);
+    streak.addColorStop(1, 'rgba(255,255,255,0)');
+    g.globalAlpha = A; g.fillStyle = streak; g.fillRect(sx, 0, 48, SKY_H);
+    g.restore();
+
+    // cursor-reactive crystal highlight along the upper frost edge
+    if (st.shimmer && st.cx !== undefined) {
+      const r = island.getBoundingClientRect();
+      const gx = x0 + clamp(st.cx - r.left, -40, W + 40);
+      const lens = g.createRadialGradient(gx, 2, 0, gx, 2, 54);
+      lens.addColorStop(0, 'rgba(255,255,255,0.62)');
+      lens.addColorStop(0.5, 'rgba(199,210,254,0.22)');
+      lens.addColorStop(1, 'rgba(255,255,255,0)');
+      g.globalAlpha = A; g.fillStyle = lens; g.fillRect(gx - 54, 0, 108, SKY_H);
+    }
+  },
+  // Amber Horizon (Solar): volcanic obsidian transitioning into warm molten-gold dusk flares
+  solar(g, t, dt, x0, x1, W, A) {
+    const bg = g.createLinearGradient(x0, 0, x1, SKY_H);
+    bg.addColorStop(0, '#120705');
+    bg.addColorStop(0.5, '#2b1106');
+    bg.addColorStop(1, '#1a0b05');
+    g.globalAlpha = A; g.fillStyle = bg; g.fillRect(x0, 0, W, SKY_H);
+
+    g.globalCompositeOperation = 'lighter';
+    const bands = [
+      { col: '234,88,12', sp: 0.0010, ph: 0.3, y: 24, amp: 5, b: 2 },
+      { col: '245,158,11', sp: -0.0008, ph: 2.2, y: 17, amp: 7, b: 7 },
+      { col: '253,224,71', sp: 0.0013, ph: 4.1, y: 13, amp: 5, b: 13 },
+    ];
+    for (const r of bands) {
+      const lv = levels[r.b] || 0;
+      for (let k = 0; k < 4; k++) {
+        const fx = x0 + ((k + 0.5) / 4) * W + Math.sin(t * r.sp + r.ph + k * 1.5) * (W * 0.14);
+        const fy = r.y + Math.cos(t * 0.0007 + k * 1.8 + r.ph) * r.amp;
+        const rad = 26 + lv * 34 + energy * 16;
+        const rg = g.createRadialGradient(fx, fy, 0, fx, fy, rad);
+        rg.addColorStop(0, `rgba(${r.col},${clamp(0.26 + lv * 0.32, 0, 0.56).toFixed(3)})`);
+        rg.addColorStop(1, `rgba(${r.col},0)`);
+        g.globalAlpha = A; g.fillStyle = rg; g.fillRect(fx - rad, 0, rad * 2, SKY_H);
+      }
+    }
+    drawStars(g, t, dt, x0, x1, W, A * 0.55, 3);
+  },
   // Aurora: flowing emerald, cyan and violet northern lights over midnight slate
   aurora(g, t, dt, x0, x1, W, A) {
     g.globalAlpha = A; g.fillStyle = '#050b16'; g.fillRect(x0, 0, W, SKY_H);
@@ -1004,10 +1252,45 @@ const PAINT = {
   },
 };
 for (const k of Object.keys(LIQ)) PAINT[k] = (g, t, dt, x0, x1, W, A) => paintLiquid(g, t, x0, x1, W, A, LIQ[k]);
+// Sapphire (crystal): silky royal-sapphire optical prism refraction waves over deep midnight indigo
+PAINT.crystal = (g, t, dt, x0, x1, W, A) => {
+  const bg = g.createLinearGradient(x0, 0, x1, SKY_H);
+  bg.addColorStop(0, '#071232'); bg.addColorStop(0.55, '#0c1c4e'); bg.addColorStop(1, '#0d1438');
+  g.globalAlpha = A; g.fillStyle = bg; g.fillRect(x0, 0, W, SKY_H);
+  g.globalCompositeOperation = 'lighter';
+  const ribbons = [
+    { col: '37,99,235', sp: 0.0012, ph: 0.2, y: 18, amp: 7, b: 3 },
+    { col: '99,102,241', sp: -0.0010, ph: 2.4, y: 15, amp: 8, b: 9 },
+    { col: '125,211,252', sp: 0.0015, ph: 4.3, y: 22, amp: 6, b: 15 },
+  ];
+  for (const r of ribbons) {
+    const lv = levels[r.b] || 0;
+    for (let k = 0; k < 4; k++) {
+      const fx = x0 + ((k + 0.5) / 4) * W + Math.sin(t * r.sp + r.ph + k * 1.45) * (W * 0.16);
+      const fy = r.y + Math.cos(t * 0.0009 + k * 2.1 + r.ph) * r.amp;
+      const rad = 26 + lv * 34 + energy * 16;
+      const rg = g.createRadialGradient(fx, fy, 0, fx, fy, rad);
+      rg.addColorStop(0, `rgba(${r.col},${clamp(0.28 + lv * 0.34, 0, 0.56).toFixed(3)})`);
+      rg.addColorStop(1, `rgba(${r.col},0)`);
+      g.globalAlpha = A; g.fillStyle = rg; g.fillRect(fx - rad, 0, rad * 2, SKY_H);
+    }
+  }
+  // crisp diagonal sapphire prism glint
+  g.save();
+  g.transform(1, 0, -0.52, 1, 0, 0);
+  const span = W + 200, sx = x0 + ((((t * 0.025) % span) + span) % span) - 80;
+  const sg = g.createLinearGradient(sx, 0, sx + 38, 0);
+  sg.addColorStop(0, 'rgba(186,230,253,0)');
+  sg.addColorStop(0.5, `rgba(186,230,253,${(0.14 + bass * 0.14).toFixed(3)})`);
+  sg.addColorStop(1, 'rgba(186,230,253,0)');
+  g.globalAlpha = A; g.fillStyle = sg; g.fillRect(sx, 0, 38, SKY_H);
+  g.restore();
+  drawStars(g, t, dt, x0, x1, W, A * 0.6, 2);
+};
 
 // ---- scenes: skins that are a small picture of something rather than a pattern
 const bandAt = (x, x0, W) => levels[clamp(Math.floor((x - x0) / W * NB), 0, NB - 1)];
-let storm = 0, strike = 0;                  // the cloud: 0 = white fair-weather cloud, 1 = thundercloud; flash = lightning just struck
+let strike = 0;                  // the cloud: 0 = white fair-weather cloud, 1 = thundercloud; strike = lightning just struck
 const cloudRGB = () => [244, 247, 251].map((v, i) => Math.round(clamp(v + ([50, 56, 68][i] - v) * storm + strike * 95 * storm, 0, 255)));
 // a white cloud; when music plays it darkens into a thundercloud (the puffs, rain and lightning are drawn by drawCloud)
 PAINT.cloud = (g, t, dt, x0, x1, W, A) => {
@@ -1120,16 +1403,16 @@ const fx = $('#fx'), fxG = fx.getContext('2d');
 const puffs = Array.from({ length: 52 }, () => [Math.random(), Math.random(), Math.random() * 6.283]);
 const drops = Array.from({ length: 26 }, () => ({ x: Math.random(), y: Math.random(), v: 0.9 + Math.random() * 0.8 }));
 const bolts = [];
-let cloudOn = false, lastBolt = 0;
+let lastBolt = 0;
 function drawCloud(t, dt, on, live) {
   if (!on) {
-    if (cloudOn) { cloudOn = false; storm = 0; strike = 0; gooG.clearRect(0, 0, goo.width, goo.height); fxG.clearRect(0, 0, fx.width, fx.height); goo.style.opacity = 0; document.body.classList.remove('daylight', 'cloud'); }
+    if (cloudOn) { cloudOn = false; storm = 0; strike = 0; gooG.clearRect(0, 0, goo.width, goo.height); fxG.clearRect(0, 0, fx.width, fx.height); goo.style.opacity = 0; document.body.classList.remove('cloud'); syncDaylight(); }
     return;
   }
   if (!cloudOn) { cloudOn = true; goo.style.opacity = 1; document.body.classList.add('cloud'); }
   storm += ((live ? 1 : 0) - storm) * Math.min(1, dt * 1.5);
   strike *= Math.pow(0.002, dt);
-  document.body.classList.toggle('daylight', storm < 0.5);
+  syncDaylight();
   const g = gooG, W = island.clientWidth, cx = goo.width / 2;
   g.clearRect(0, 0, goo.width, goo.height);
   g.fillStyle = `rgb(${cloudRGB()})`;
@@ -1218,10 +1501,9 @@ function drawBody(t, dt, key, live) {
 // Ice: a frozen pill with icicles hanging from it. They grow and shrink with the music; snow drifts down.
 const icicles = Array.from({ length: 44 }, () => ({ w: 5 + Math.random() * 6, len: 0, base: 5 + Math.random() * 13, gap: 3 + Math.random() * 9, band: 1 + Math.floor(Math.random() * (NB - 3)), ph: Math.random() * 6.283 }));
 const flakes = Array.from({ length: 22 }, () => ({ x: Math.random(), y: Math.random(), v: 0.12 + Math.random() * 0.2, ph: Math.random() * 6.283 }));
-let iceOn = false;
 function drawIce(t, dt, on, live) {
-  if (!on) { if (iceOn) { iceOn = false; fxG.clearRect(0, 0, fx.width, fx.height); document.body.classList.remove('daylight'); } return; }
-  if (!iceOn) { iceOn = true; document.body.classList.add('daylight'); }
+  if (!on) { if (iceOn) { iceOn = false; fxG.clearRect(0, 0, fx.width, fx.height); syncDaylight(); } return; }
+  if (!iceOn) { iceOn = true; syncDaylight(); }
   const f = fxG, W = island.clientWidth, cx = fx.width / 2, x0 = cx - W / 2;
   f.clearRect(0, 0, fx.width, fx.height);
   f.fillStyle = sceneGrad(f, ICE, 0);
@@ -1259,10 +1541,10 @@ function drawLook(t, dt, live) {
   g.clearRect(0, 0, SKY_W, SKY_H);
   if (skyA < 0.01) return;
   // behind a row of buttons or a line of text the skin steps back, so everything stays easy to read
-  const want = cur === 'idle' || ['cloud', 'water', 'lava', 'ice'].includes(lookDrawn) ? 1 : cur === 'media' || cur === 'held' ? 0.72 : lookDrawn === 'sky' ? 0.8 : 0.55;
+  const want = cur === 'idle' || ['frost', 'cloud', 'water', 'lava', 'ice'].includes(lookDrawn) ? 1 : cur === 'media' || cur === 'held' ? 0.72 : lookDrawn === 'sky' ? 0.8 : 0.55;
   dimA += (want - dimA) * 0.18;
   const W = island.clientWidth, x0 = (SKY_W - W) / 2;
-  (PAINT[lookDrawn] || paintSky)(g, t, dt, x0, x0 + W, W, skyA * dimA * (live || ['cloud', 'water', 'lava', 'ice'].includes(lookDrawn) ? 1 : 0.9));
+  (PAINT[lookDrawn] || paintSky)(g, t, dt, x0, x0 + W, W, skyA * dimA * (live || ['frost', 'cloud', 'water', 'lava', 'ice'].includes(lookDrawn) ? 1 : 0.9));
   g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
 }
 const barsC = $('#bars'), barsG = barsC.getContext('2d');
@@ -1273,12 +1555,11 @@ function frame(t) {
   const look = st.skin !== 'black' ? st.skin : playing && st.visuals && st.react ? 'sky' : null;      // plain obsidian gets night sky while music plays; Liquid Glass & animated themes stay active
   if (look !== lookNow) {
     if (look && lookNow) skyA = Math.min(skyA, 0.2);       // one skin gives way to another: fade the new one in
-    lookNow = look; applyPal();
+    lookNow = look; syncSurfaceClasses(); applyPal();
   }
   if (look) lookDrawn = look;
   skyA += ((look ? 1 : 0) - skyA) * 0.07;
-  island.classList.toggle('sky', skyA > 0.4 && lookDrawn !== 'glass');
-  document.body.classList.toggle('glass', st.skin === 'glass');
+  island.classList.toggle('sky', skyA > 0.4 && lookDrawn !== 'glass' && lookDrawn !== 'frost');
   paintSeek();
   if (!playing && energy < 0.004) {
     if (skyA < 0.01) {
@@ -1293,7 +1574,7 @@ function frame(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t; lastPaint = t;
   sampleLevels(t, playing);
 
-  const glassRest = st.skin === 'glass' && !st.tucked ? 0.14 : 0;
+  const glassRest = (st.skin === 'glass' || st.skin === 'frost') && !st.tucked ? (st.skin === 'frost' ? 0.12 : 0.16) : 0;
   glow.style.opacity = playing && st.react && (!aura || aura === 'lava')
     ? (skyA * clamp(0.12 + bass * 0.36, 0, 0.44)).toFixed(3)
     : glassRest.toFixed(3);
@@ -1338,11 +1619,17 @@ const seekEl = $('#seek'), fmtT = (ms) => { const s = Math.max(0, Math.floor(ms 
 let scrubRatio = 0, artistText = '';
 const mediaPos = () => { const m = st.media; return clamp(m.pos + (m.playing ? performance.now() - m.at : 0), 0, m.dur || 0); };
 function paintSeek() {
-  const m = st.media, on = cur === 'media' && m.dur > 0 && !st.tucked;
+  const m = st.media;
+  const mediaBar = cur === 'media' && m.dur > 0 && !st.tucked;
+  const timerBar = cur === 'timer' && timer.running && timer.total > 0 && !st.tucked;
+  const on = mediaBar || timerBar;
   if (seekEl.classList.contains('on') !== on) seekEl.classList.toggle('on', on);
-  if (seekEl.classList.contains('can') !== !!m.canSeek) seekEl.classList.toggle('can', !!m.canSeek);
+  if (seekEl.classList.contains('timer-bar') !== timerBar) seekEl.classList.toggle('timer-bar', timerBar);
+  if (seekEl.classList.contains('can') !== (mediaBar && !!m.canSeek)) seekEl.classList.toggle('can', mediaBar && !!m.canSeek);
   if (!on) return;
-  const r = st.scrubbing ? scrubRatio : mediaPos() / m.dur;
+  const r = timerBar
+    ? clamp(1 - Math.max(0, timer.endAt - Date.now()) / timer.total, 0, 1)
+    : (st.scrubbing ? scrubRatio : mediaPos() / m.dur);
   $('#seek-fill').style.width = (r * 100).toFixed(2) + '%';
   $('#seek-knob').style.left = (r * 100).toFixed(2) + '%';
 }
@@ -1401,7 +1688,7 @@ function tick() {
   const left = timer.running ? Math.max(0, timer.endAt - Date.now()) : timer.left;
   if (timer.running && left <= 0) {
     timer.running = false; timer.left = 0; timer.done = true;
-    beep(); showNotif({ app: 'Timer', title: 'Time is up', body: '' });
+    chime('done'); triggerSheen(); showNotif({ app: 'Timer', title: 'Time is up', body: '', silent: true });
   }
   const it = $('#i-time');
   it.textContent = timer.running ? mmss(left) : hm;
@@ -1413,6 +1700,8 @@ function tick() {
   if (td.textContent !== dt) td.textContent = dt;
   $('#tm-time').textContent = mmss(left);
   $('#tm-time').classList.toggle('done', timer.done);
+  const mins = Math.round(timer.left / 60000);
+  $$('.tm-pre button').forEach((b) => b.classList.toggle('on', !timer.running && Number(b.dataset.min) === mins));
   $('#m-timer').textContent = timer.running ? mmss(left) : '';
   views.media.classList.toggle('timing', timer.running);
   setIcon($('#tm-start'), timer.running ? 'pause' : 'play');
@@ -1453,34 +1742,42 @@ $$('[data-act]').forEach((b) => b.addEventListener('click', async () => {
 }));
 
 // ------------------------------------------------------------ timer
-function beep() {
-  try {
-    const ctx = new AudioContext();
-    [0, 0.22, 0.44, 0.9, 1.12, 1.34].forEach((t, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = i % 3 === 2 ? 1175 : 880;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
-      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.18);
-      o.connect(g).connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.2);
-    });
-    setTimeout(() => ctx.close(), 2500);
-  } catch { /* no audio device */ }
-}
 function nudge(dir) {
-  if (timer.running) { timer.endAt = Math.max(Date.now() + 1000, timer.endAt + dir * 60000); return; }
+  if (timer.running) {
+    const next = Math.max(Date.now() + 1000, timer.endAt + dir * 60000);
+    timer.endAt = next;
+    timer.total = Math.max(timer.total, next - Date.now());
+    return;
+  }
   const min = Math.round(timer.left / 60000);
   const step = (dir > 0 ? min >= 10 : min > 10) ? 5 : 1;
-  timer.left = clamp(min + dir * step, 1, 180) * 60000; timer.done = false;
+  timer.left = clamp(min + dir * step, 1, 180) * 60000;
+  timer.total = timer.left;
+  timer.done = false;
 }
-$('#tm-minus').addEventListener('click', () => { nudge(-1); tick(); });
-$('#tm-plus').addEventListener('click', () => { nudge(1); tick(); });
+$('#tm-minus').addEventListener('click', () => { nudge(-1); chime('tick'); tick(); });
+$('#tm-plus').addEventListener('click', () => { nudge(1); chime('tick'); tick(); });
+$('#tm-time').addEventListener('wheel', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  nudge(e.deltaY < 0 ? 1 : -1);
+  tick();
+}, { passive: false });
+$$('.tm-pre button').forEach((b) => b.addEventListener('click', () => {
+  const m = Number(b.dataset.min) || 25;
+  timer.running = false; timer.done = false;
+  timer.left = m * 60000; timer.total = timer.left;
+  chime('tick'); tick(); render();
+}));
 $('#tm-start').addEventListener('click', () => {
   if (timer.running) { timer.left = Math.max(0, timer.endAt - Date.now()); timer.running = false; }
-  else { if (timer.left <= 0) timer.left = 25 * 60000; timer.done = false; timer.endAt = Date.now() + timer.left; timer.running = true; }
-  tick(); render();
+  else {
+    if (timer.left <= 0) { timer.left = 25 * 60000; timer.total = timer.left; }
+    if (timer.total < timer.left) timer.total = timer.left;
+    timer.done = false; timer.endAt = Date.now() + timer.left; timer.running = true;
+  }
+  chime('tick'); tick(); render();
 });
-$('#tm-reset').addEventListener('click', () => { timer.running = false; timer.done = false; timer.left = 25 * 60000; tick(); render(); });
+$('#tm-reset').addEventListener('click', () => { timer.running = false; timer.done = false; timer.left = 25 * 60000; timer.total = timer.left; chime('tick'); tick(); render(); });
 
 // ------------------------------------------------------------ one line of typing on the pill
 // ask() turns the pill into a text field and resolves with what was typed (null = cancelled).
@@ -1663,7 +1960,7 @@ setInterval(() => {
     if (!n.remind || n.fired || n.remind > now) continue;
     n.fired = true;
     window.pillvyn.noteFired(n.id).then(setNotes);
-    beep(); showNotif({ app: 'Reminder', title: n.text.replace(/\s+/g, ' '), body: '', long: true, action: 'note' });
+    chime('done'); showNotif({ app: 'Reminder', title: n.text.replace(/\s+/g, ' '), body: '', long: true, action: 'note', silent: true });
   }
 }, 3000);
 
@@ -1924,13 +2221,15 @@ const SETTINGS_SECTIONS = {
     ['toggle', 'visuals', 'Night sky with music (Obsidian)'],
   ],
   behavior: [
-    ['sec', 'Startup & Calendar'],
+    ['sec', 'Startup & Position'],
     ['toggle', 'autoStart', 'Start with Windows'],
+    ['step', 'topOffset', 'Distance from screen top', 0, 24, 'px', 2],
     ['seg', 'calendar', 'Date', [['gregorian', 'Greg.'], ['shamsi', 'Shamsi'], ['shamsi-fa', 'شمسی'], ['both', 'Both']]],
-    ['sec', 'Visibility & Notifications'],
+    ['sec', 'Visibility, Audio & Alerts'],
     ['toggle', 'autoHide', 'Hide while a window is underneath'],
     ['toggle', 'hideVideo', 'Stay out of the way for videos'],
-    ['step', 'notifSeconds', 'Notification stays for', 2, 15, 's'],
+    ['toggle', 'sounds', 'Subtle UI sound effects'],
+    ['step', 'notifSeconds', 'Notification stays for', 2, 15, 's', 1],
     ['button', 'dnd', "Hide Windows' own banners", 'Open'],
   ],
   features: [
@@ -1994,7 +2293,7 @@ function renderSettings() {
     stackList.appendChild(row);
   }
   const items = SETTINGS_SECTIONS[st.settingsTab] || SETTINGS_SECTIONS.appearance;
-  items.forEach(([type, key, label, a, b, unit], i) => {
+  items.forEach(([type, key, label, a, b, unit, inc], i) => {
     if (type === 'sec') {
       const h = document.createElement('div'); h.className = 'set-sec'; h.textContent = key;
       stackList.appendChild(h);
@@ -2006,9 +2305,9 @@ function renderSettings() {
       const meta = document.createElement('div'); meta.className = 'about-meta';
       const title = document.createElement('div'); title.className = 'about-title';
       const name = document.createElement('b'); name.textContent = s.appName || 'PILLVYN';
-      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.1.0');
+      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.2.0');
       title.append(name, ver);
-      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island for Windows · Glass Edition';
+      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island for Windows · Studio Edition';
       meta.append(title, sub);
       card.append(ic, meta);
       stackList.appendChild(card);
@@ -2045,10 +2344,10 @@ function renderSettings() {
         card.dataset.theme = val;
         card.title = (THEMES[val] && THEMES[val].name) || val;
         const prev = document.createElement('div'); prev.className = 'theme-prev tp-' + val;
-        const nm = document.createElement('span'); nm.textContent = val === 'glass' ? 'Glass' : ((THEMES[val] && THEMES[val].name) || val);
+        const nm = document.createElement('span'); nm.textContent = (THEMES[val] && (THEMES[val].short || THEMES[val].name)) || val;
         card.append(prev, nm);
         card.addEventListener('click', () => {
-          triggerSheen();
+          triggerSheen(); chime('tick');
           window.pillvyn.setSetting(key, val);
         });
         grid.appendChild(card);
@@ -2069,6 +2368,7 @@ function renderSettings() {
         const next = !sw.classList.contains('on');
         sw.classList.toggle('on', next);
         sw.setAttribute('aria-checked', String(next));
+        chime('tick');
         window.pillvyn.setSetting(key, next);
       });
       row.appendChild(sw);
@@ -2078,20 +2378,24 @@ function renderSettings() {
       for (const [val, text] of a) {
         const bt = document.createElement('button'); bt.textContent = text;
         if (curVal === val) bt.className = 'on';
-        bt.addEventListener('click', () => window.pillvyn.setSetting(key, val));
+        bt.addEventListener('click', () => { chime('tick'); window.pillvyn.setSetting(key, val); });
         seg.appendChild(bt);
       }
       row.appendChild(seg);
     } else if (type === 'step') {
-      const cur = clamp(Number(s[key]) || a, a, b);
+      const stepBy = inc || 1;
+      const raw = Number(s[key]);
+      const cur = clamp(Number.isFinite(raw) ? raw : a, a, b);
       const mk = (icon, d) => {
         const bt = document.createElement('button');
         bt.className = 'ib small';
         bt.innerHTML = svg(icon);
         bt.disabled = (d < 0 && cur <= a) || (d > 0 && cur >= b);
         bt.addEventListener('click', () => {
-          const live = clamp(Number((st.settings && st.settings[key]) || cur), a, b);
-          window.pillvyn.setSetting(key, clamp(live + d, a, b));
+          const liveRaw = Number(st.settings && st.settings[key]);
+          const live = clamp(Number.isFinite(liveRaw) ? liveRaw : cur, a, b);
+          chime('tick');
+          window.pillvyn.setSetting(key, clamp(live + d * stepBy, a, b));
         });
         return bt;
       };
@@ -2132,11 +2436,11 @@ const TOUR = [
   ['clipboard', 'Clipboard history', 'Everything you copied, with images and pins', 'clips'],
   ['key', 'Passwords', 'Makes one, asks what it is for, keeps it encrypted', 'vault'],
   ['timer', 'Timer', 'Stays in sight while it runs', 'timer'],
-  ['gear', 'Themes and settings', 'Liquid Glass, Aurora, Venom, and categorized studio', 'settings'],
+  ['gear', 'Themes and settings', 'Liquid Glass, Frosted Pearl, Aurora, Solar & Settings Studio', 'settings'],
 ];
 function renderTour() {
   $('#stack-clear').classList.add('hidden');
-  const head = document.createElement('div'); head.className = 'row empty wide'; head.textContent = 'Hover the pill to open its menu';
+  const head = document.createElement('div'); head.className = 'row empty wide'; head.textContent = 'Hover or click the pill to open its menu · right-click for Settings';
   stackList.appendChild(head);
   TOUR.forEach(([icon, title, text, act, keys], i) => {
     const row = document.createElement('div'); row.className = 'row set sp tour' + (act ? ' can' : ''); row.style.setProperty('--i', Math.min(i + 1, 6));
@@ -2156,7 +2460,7 @@ function renderTour() {
 // opened from the tray icon, or by starting the app a second time
 window.pillvyn.onOpen((what) => {
   st.holdUntil = Date.now() + 9000; st.revealUntil = Date.now() + 9000;
-  setStack(true, what === 'settings' ? 'settings' : st.stackKind);
+  setStack(true, what === 'settings' ? 'settings' : what === 'tour' ? 'tour' : st.stackKind);
 });
 window.pillvyn.onHotkey((what) => { if (what === 'note' && !st.typing) { st.holdUntil = Date.now() + 1500; quickNote(); } });
 
@@ -2201,12 +2505,14 @@ const applySettings = (s) => {
   st.deviceAlerts = s.deviceAlerts !== false;
   st.shelfOn = s.shelf !== false;
   st.visuals = s.visuals !== false;
-  st.skin = SKIN_ORDER.includes(s.skin) ? s.skin : 'glass';
+  st.skin = THEMES[s.skin] ? s.skin : 'glass';
   st.musicTheme = THEMES[s.musicTheme] ? s.musicTheme : 'sky';
   st.smartCopy = s.smartCopy !== false;
   st.react = s.musicReact !== false;
   st.shimmer = s.shimmer !== false;
-  document.body.classList.toggle('glass', st.skin === 'glass');
+  st.sounds = s.sounds !== false;
+  syncSurfaceClasses();
+  applyPal();
   document.body.classList.toggle('shimmer-off', !st.shimmer);
   if (s.netAlerts === false) { st.net = { online: true, vpn: '', proxy: false }; paintStatus(); }
   st.calendar = CALENDARS.includes(s.calendar) ? s.calendar : 'gregorian';
@@ -2341,6 +2647,6 @@ window.pillvyn.onDownload((d) => {
 });
 window.pillvyn.onSettings(applySettings);
 window.pillvyn.getSettings().then(applySettings);
-paintVol(); tick(); updateBadge(); paintStatus(); render();
-window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
+syncSurfaceClasses(); paintVol(); tick(); updateBadge(); paintStatus(); render();
+window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, chime, showTip, hideTip, extractCoverAccent, setArt, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
 })();

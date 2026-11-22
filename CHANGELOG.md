@@ -2,6 +2,24 @@
 
 All notable changes to **PILLVYN** are documented here.
 
+## [3.2.0] - 2026-11-23
+
+### Added
+- **Frosted Pearl Daylight Glass Theme (`frost`):** Bright translucent pearlescent glass-morphism with drifting pastel sky/lavender/rose caustics, cursor-reactive prism gleam, adaptive dark ink (`body.daylight`), and matching bright frosted dropdown stacks, tabs, switches, and tooltips.
+- **Amber Horizon Theme (`solar`) & Rebuilt Sapphire Prism (`crystal`):** Added a warm obsidian-to-molten-gold solar dusk theme and upgraded Sapphire (`crystal`) into silky optical cobalt-indigo prism refraction waves, paired with cohesive atmospheric stack surfaces across **Aurora**, **Nebula**, **Sapphire**, and **Amber Horizon**.
+- **Floating Micro-Tooltips (`#tip`):** Hovering toolbar icons displays sleek floating micro-tooltips with keyboard shortcut pills (such as `Ctrl+Alt+T` and `Ctrl+Alt+N`), hiding cleanly when stacks open or views change without affecting click-through hit-testing.
+- **Direct Pill Interactions & Keyboard Escape:** Clicking the resting pill opens the toolbar immediately with a subtle sheen and wink; right-clicking anywhere on the island opens **Settings Studio** directly; pressing `Escape` dismisses open dropdown panels.
+- **Draggable Volume Scrubber & Mute Toggle:** Upgraded the volume HUD with a dedicated mute button (`#v-mute`) and an interactive click/drag slider bar (`#v-bar` + `#v-knob`) alongside smooth scroll-wheel volume stepping.
+- **Focus Timer Quick Presets, Wheel Adjust & Countdown Hairline:** Added one-click `5m`, `15m`, and `25m` preset chips, scroll-wheel minute adjustment directly on the timer readout, and a warm amber bottom countdown progress bar while running.
+- **Album-Art Dynamic Glow Accent:** Samples loaded album covers on an offscreen probe to softly tint `#glow` and the track scrubber in **Liquid Glass** and **Obsidian** modes while keeping text crisp and readable.
+- **Optional Micro-Acoustics (`sounds`):** Added subtle Web Audio chimes for incoming notifications, shelf drops, control interactions, and timer/reminder completion, toggleable in **Settings → Behavior**.
+- **Live Top Screen Offset (`topOffset`):** Added a DPI-scaled `0–24px` vertical offset stepper (`step 2px`) in **Settings → Behavior** that repositions the island immediately without restarting.
+- **Expanded System Tray Menu with Live Sync:** Added quick actions for **Open Settings…**, **What PILLVYN can do**, **Quick Note (`Ctrl+Alt+N`)**, and **Text Grab (`Ctrl+Alt+T`)**, and synchronized the tray's **Start with Windows** checkmark whenever toggled inside Settings Studio.
+
+### Fixed
+- **Daylight Class Coordination (`ui/app.js`, `ui/style.css`):** Centralized `syncDaylight()` and `syncSurfaceClasses()` so switching between `frost`, `cloud`, and `ice` never leaves stale light/dark styling or drops icon contrast on active buttons and toggles.
+- **Zero-Bound Settings Stepper Handling (`ui/app.js`):** Replaced truthy fallback with `Number.isFinite` so `0px` values in `topOffset` render and step accurately with properly disabled boundary buttons.
+
 ## [3.1.0] - 2026-11-22
 
 ### Added

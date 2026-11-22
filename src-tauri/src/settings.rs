@@ -1,6 +1,7 @@
 // Settings (one small JSON file) and the "Start with Windows" entry.
 use std::ffi::c_void;
-use std::sync::Mutex;
+use std::sync::atomic::Ordering::SeqCst;
+use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Map, Value};
 use windows::core::HSTRING;
@@ -9,16 +10,25 @@ use windows::Win32::System::Registry::*;
 
 use crate::sys;
 
+type TraySyncFn = Box<dyn Fn(bool) + Send + Sync>;
+
 static SETTINGS: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
-const THEMES: [&str; 12] = [
-    "glass", "black", "nebula", "aurora", "crystal", "ember", "reactor", "venom", "cloud", "water",
-    "lava", "ice",
+static TRAY_AUTO_SYNC: OnceLock<TraySyncFn> = OnceLock::new();
+
+pub fn register_tray_autostart_sync(f: impl Fn(bool) + Send + Sync + 'static) {
+    let _ = TRAY_AUTO_SYNC.set(Box::new(f));
+}
+
+const THEMES: [&str; 14] = [
+    "glass", "frost", "black", "aurora", "nebula", "crystal", "solar", "venom", "ember", "reactor",
+    "cloud", "water", "lava", "ice",
 ];
 const FACES: [&str; 3] = ["eyes", "clock", "logo"];
-const BOOLS: [&str; 16] = [
+const BOOLS: [&str; 17] = [
     "autoUpdate",
     "musicReact",
     "shimmer",
+    "sounds",
     "netAlerts",
     "sensorDot",
     "smartCopy",
@@ -40,12 +50,14 @@ fn defaults() -> Map<String, Value> {
         "autoHide": true, "dndHint": false, "toured": false, "calendar": "gregorian", "hideVideo": true,
         "copyPreview": true, "clipHistory": true, "deviceAlerts": true, "downloadAlerts": true, "shelf": true, "visuals": true,
         "notifSeconds": 4,          // how long a notification stays on the pill
+        "topOffset": 0,             // extra vertical offset from the top screen edge (0..=24 px)
         "face": "eyes",             // what the resting pill shows: "eyes", "clock", or "logo"
         "noteHotkey": true,         // Ctrl+Alt+N opens the quick note from anywhere
         "vaultLength": 18, "vaultSymbols": true, "lastUser": "",
-        "skin": "glass",            // the resting pill: liquid glass, obsidian, or an animated theme
+        "skin": "glass",            // the resting pill: liquid glass, frosted pearl, obsidian, or an animated theme
         "musicTheme": "sky",        // what plays behind the track: "sky" or an animated skin
         "shimmer": true,            // glass rim glint & state-change shimmer sweep
+        "sounds": true,             // subtle UI micro-acoustic feedback chimes
         "netAlerts": true, "sensorDot": true, "smartCopy": true, "musicReact": true, "autoUpdate": true,
     })
     .as_object()
@@ -66,9 +78,20 @@ fn valid_notif_seconds(v: f64) -> Option<i64> {
     let n = v.round() as i64;
     (2..=15).contains(&n).then_some(n)
 }
+fn valid_top_offset(v: f64) -> Option<i64> {
+    let n = v.round() as i64;
+    (0..=24).contains(&n).then_some(n)
+}
 fn valid_vault_length(v: f64) -> Option<i64> {
     let n = v.round() as i64;
     (8..=40).contains(&n).then_some(n)
+}
+
+pub fn top_offset() -> isize {
+    get("topOffset")
+        .as_f64()
+        .and_then(valid_top_offset)
+        .unwrap_or(0) as isize
 }
 fn file() -> std::path::PathBuf {
     sys::data_dir().join("settings.json")
@@ -122,6 +145,9 @@ pub fn apply(key: &str, value: &Value) {
             let on = value.as_bool().unwrap_or(false);
             put("autoStart", on.into());
             set_autostart(on);
+            if let Some(sync) = TRAY_AUTO_SYNC.get() {
+                sync(autostart_on());
+            }
         }
         "calendar" => {
             if let Some(v) = value.as_str().filter(|v| valid_calendar(v)) {
@@ -149,6 +175,13 @@ pub fn apply(key: &str, value: &Value) {
         "notifSeconds" => {
             if let Some(n) = value.as_f64().and_then(valid_notif_seconds) {
                 put(key, n.into());
+            }
+        }
+        "topOffset" => {
+            if let Some(n) = value.as_f64().and_then(valid_top_offset) {
+                put(key, n.into());
+                crate::hit::OFFSET_Y.store(n as isize, SeqCst);
+                crate::hit::reposition();
             }
         }
         "vaultLength" => {
@@ -250,13 +283,16 @@ mod tests {
         assert_eq!(d.get("skin").and_then(Value::as_str), Some("glass"));
         assert_eq!(d.get("face").and_then(Value::as_str), Some("eyes"));
         assert_eq!(d.get("shimmer").and_then(Value::as_bool), Some(true));
+        assert_eq!(d.get("sounds").and_then(Value::as_bool), Some(true));
+        assert_eq!(d.get("topOffset").and_then(Value::as_i64), Some(0));
         assert_eq!(d.get("notifSeconds").and_then(Value::as_i64), Some(4));
     }
 
     #[test]
     fn validates_themes_faces_and_ranges() {
         for skin in [
-            "glass", "black", "nebula", "aurora", "crystal", "ember", "reactor", "venom",
+            "glass", "frost", "black", "aurora", "nebula", "crystal", "solar", "venom", "ember",
+            "reactor",
         ] {
             assert!(valid_skin(skin), "expected valid skin {skin}");
         }
@@ -271,6 +307,11 @@ mod tests {
         assert_eq!(valid_notif_seconds(15.0), Some(15));
         assert_eq!(valid_notif_seconds(1.0), None);
         assert_eq!(valid_notif_seconds(16.0), None);
+
+        assert_eq!(valid_top_offset(0.0), Some(0));
+        assert_eq!(valid_top_offset(24.0), Some(24));
+        assert_eq!(valid_top_offset(-1.0), None);
+        assert_eq!(valid_top_offset(25.0), None);
 
         assert_eq!(valid_vault_length(8.0), Some(8));
         assert_eq!(valid_vault_length(40.0), Some(40));

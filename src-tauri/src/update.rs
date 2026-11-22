@@ -330,9 +330,9 @@ mod tests {
     #[test]
     fn versions_compare_by_number() {
         assert!(newer("3.10.0", "3.9.9"));
-        assert!(newer("v3.1.1", "3.1.0"));
-        assert!(newer("3.1.0", "3.0.0"));
-        assert!(!newer("3.1.0", "3.1.0"));
-        assert!(!newer("", "3.1.0"));
+        assert!(newer("v3.2.1", "3.2.0"));
+        assert!(newer("3.2.0", "3.1.0"));
+        assert!(!newer("3.2.0", "3.2.0"));
+        assert!(!newer("", "3.2.0"));
     }
 }

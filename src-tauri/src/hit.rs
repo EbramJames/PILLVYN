@@ -59,19 +59,27 @@ unsafe fn apply_style(h: HWND) {
     }
 }
 
-/// Top centre of the primary screen, at the size the current scale asks for.
+/// Top centre of the primary screen, at the size and vertical offset the current scale asks for.
 unsafe fn place(h: HWND) {
+    if h.0.is_null() {
+        return;
+    }
     let scale = GetDpiForWindow(h).max(96) as f64 / 96.0;
     let (w, hgt) = (
         (WIN_W * scale).round() as i32,
         (WIN_H * scale).round() as i32,
     );
     let x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
-    let y = OFFSET_Y.load(SeqCst) as i32;
+    let y = (OFFSET_Y.load(SeqCst) as f64 * scale).round() as i32;
     let r = sys::rect_of(h);
     if r.left != x || r.top != y || r.right - r.left != w || r.bottom - r.top != hgt {
         let _ = SetWindowPos(h, None, x, y, w, hgt, SWP_NOZORDER | SWP_NOACTIVATE);
     }
+}
+
+/// Immediately repositions the island window after a top-offset change in Settings.
+pub fn reposition() {
+    unsafe { place(sys::hwnd()) };
 }
 
 /// A text field opened or closed on the pill. While one is open the window is an ordinary focusable window.

@@ -355,19 +355,30 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .item(&title)
         .separator()
-        .text("settings", "Settings…")
+        .text("settings", "Open Settings…")
+        .text("tour", "What PILLVYN can do")
+        .text("note", "Quick Note  (Ctrl+Alt+N)")
+        .text("ocr", "Text Grab  (Ctrl+Alt+T)")
+        .separator()
         .item(&auto)
         .text("restart", "Restart")
         .separator()
         .text("quit", "Quit")
         .build()?;
+    let auto_sync = auto.clone();
+    settings::register_tray_autostart_sync(move |checked| {
+        let _ = auto_sync.set_checked(checked);
+    });
     TrayIconBuilder::with_id("main")
         .icon(tray_icon())
-        .tooltip(sys::APP_NAME)
+        .tooltip(format!("{} {}", sys::APP_NAME, env!("CARGO_PKG_VERSION")))
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, ev| match ev.id().as_ref() {
             "settings" => sys::emit("open", "settings"),
+            "tour" => sys::emit("open", "tour"),
+            "note" => sys::emit("hotkey", "note"),
+            "ocr" => ocr::start(),
             "autostart" => {
                 let on = auto.is_checked().unwrap_or(false);
                 settings::put("autoStart", on.into());
@@ -401,14 +412,16 @@ fn main() {
         .or_else(|| std::env::var_os("ISLAND_DEBUG"))
         .map(PathBuf::from);
     let _ = sys::DEBUG_DIR.set(debug.clone());
+    settings::load();
     if let Some(y) = std::env::var("PILLVYN_Y")
         .or_else(|_| std::env::var("ISLAND_Y"))
         .ok()
         .and_then(|v| v.parse::<isize>().ok())
     {
         hit::OFFSET_Y.store(y, SeqCst);
+    } else {
+        hit::OFFSET_Y.store(settings::top_offset(), SeqCst);
     }
-    settings::load();
     hit::HOTKEY_WANTED.store(settings::flag("noteHotkey") && debug.is_none(), SeqCst);
 
     let mut builder = tauri::Builder::default();

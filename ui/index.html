@@ -28,18 +28,18 @@
     <span id="t-bat" class="dim"></span>
     <span id="t-net" class="tag"></span>
     <span class="sep"></span>
-    <button class="ib hidden" id="t-track" data-icon="note" title="Back to now playing"></button>
-    <button class="ib" id="t-play" data-icon="play" title="Play / Pause"></button>
-    <button class="ib" data-act="screenshot" data-icon="shot" title="Screenshot"></button>
-    <button class="ib" data-act="ocr" data-icon="scan" title="Grab text from the screen: drag a box around it (Ctrl+Alt+T)"></button>
-    <button class="ib" data-act="clips" id="t-clips" data-icon="clipboard" title="Clipboard history"></button>
-    <button class="ib" data-act="notes" id="t-notes" data-icon="jot" title="Quick note (Ctrl+Alt+N)"></button>
-    <button class="ib" data-act="vault" id="t-vault" data-icon="key" title="Passwords"></button>
-    <button class="ib hidden" data-act="speedo" id="t-speedo" data-icon="shield" title="Speedo VPN"></button>
-    <button class="ib" data-act="timer" data-icon="timer" title="Timer"></button>
-    <button class="ib hidden" data-act="shelf" id="t-shelf" data-icon="tray" draggable="true" title="File shelf — click to see the files, drag this button to take them all"></button>
-    <button class="ib" data-act="inbox" id="t-inbox" data-icon="bell" title="Notifications"></button>
-    <button class="ib" data-act="settings" id="t-gear" data-icon="gear" title="Settings"></button>
+    <button class="ib hidden" id="t-track" data-icon="note" data-tip="Now playing"></button>
+    <button class="ib" id="t-play" data-icon="play" data-tip="Play / Pause"></button>
+    <button class="ib" data-act="screenshot" data-icon="shot" data-tip="Screenshot"></button>
+    <button class="ib" data-act="ocr" data-icon="scan" data-tip="Text grab" data-key="Ctrl+Alt+T"></button>
+    <button class="ib" data-act="clips" id="t-clips" data-icon="clipboard" data-tip="Clipboard history"></button>
+    <button class="ib" data-act="notes" id="t-notes" data-icon="jot" data-tip="Quick note" data-key="Ctrl+Alt+N"></button>
+    <button class="ib" data-act="vault" id="t-vault" data-icon="key" data-tip="Password vault"></button>
+    <button class="ib hidden" data-act="speedo" id="t-speedo" data-icon="shield" data-tip="Speedo VPN"></button>
+    <button class="ib" data-act="timer" data-icon="timer" data-tip="Focus timer"></button>
+    <button class="ib hidden" data-act="shelf" id="t-shelf" data-icon="tray" draggable="true" data-tip="File shelf"></button>
+    <button class="ib" data-act="inbox" id="t-inbox" data-icon="bell" data-tip="Notifications"></button>
+    <button class="ib" data-act="settings" id="t-gear" data-icon="gear" data-tip="Settings"></button>
   </div>
 
   <!-- now playing -->
@@ -85,10 +85,10 @@
     <button class="ib small" id="hd-menu" data-icon="more" title="Menu"></button>
   </div>
 
-  <!-- volume HUD -->
-  <div class="view" data-view="vol" title="Click to mute">
-    <span id="v-icon" class="glyph" data-icon="volume"></span>
-    <div class="vbar"><i id="v-fill"></i></div>
+  <!-- volume HUD (click icon to mute, drag bar or scroll wheel to adjust) -->
+  <div class="view" data-view="vol">
+    <button class="ib small" id="v-mute" data-icon="volume" title="Click to mute"></button>
+    <div class="vbar" id="v-bar"><i id="v-fill"></i><b id="v-knob"></b></div>
     <b id="v-num">50</b>
   </div>
 
@@ -96,8 +96,9 @@
   <div class="view" data-view="timer">
     <span class="glyph amber" data-icon="timer"></span>
     <button class="ib small" id="tm-minus" data-icon="minus" title="Less"></button>
-    <span id="tm-time">25:00</span>
+    <span id="tm-time" title="Scroll to adjust minutes">25:00</span>
     <button class="ib small" id="tm-plus" data-icon="plus" title="More"></button>
+    <span class="tm-pre"><button data-min="5">5m</button><button data-min="15">15m</button><button data-min="25">25m</button></span>
     <button class="ib solid" id="tm-start" data-icon="play" title="Start / Pause"></button>
     <button class="ib" id="tm-reset" data-icon="reset" title="Reset"></button>
   </div>
@@ -130,6 +131,9 @@
   <div id="dots"></div>
   <div id="flash"></div>
 </div>
+
+<!-- floating micro-tooltip for hovered toolbar buttons -->
+<div id="tip" role="tooltip"></div>
 
 <!-- a notification that arrives while the pill is being used waits here, beside it -->
 <div id="side"><div class="ic"></div><span dir="auto"></span></div>
