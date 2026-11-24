@@ -18,7 +18,7 @@
 
   <!-- idle: blinking eyes, clock, or PILLVYN emblem -->
   <div class="view on" data-view="idle">
-    <img id="i-logo" src="icon.png" alt=""><span id="i-face"><i></i><i></i></span><span id="i-time">--:--</span><span id="i-shelf"></span>
+    <img id="i-logo" src="icon.png" alt=""><span id="i-face"><i></i><i></i></span><span id="i-time">--:--</span><span id="i-shelf"></span><i id="i-wake" title="Hands-free wake active (“Hello PILLVYN”)"></i>
   </div>
 
   <!-- hover on idle: a one-line tray -->
@@ -129,6 +129,7 @@
   <!-- PILLVYN AI voice assistant pill view -->
   <div class="view" data-view="ai">
     <span id="ai-orb"><i></i></span>
+    <span id="ai-wave" class="ai-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
     <span id="ai-pill-state" class="strong">PILLVYN AI</span>
     <span id="ai-pill-text" class="mqbox dim" dir="auto"><span class="mq">Say “Hello PILLVYN” or ask anything…</span></span>
     <button class="ib small" id="ai-pill-mic" data-icon="mic" title="Listen / Stop"></button>

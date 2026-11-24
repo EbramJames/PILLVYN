@@ -25,6 +25,7 @@ const THEMES: [&str; 14] = [
 ];
 const FACES: [&str; 3] = ["eyes", "clock", "logo"];
 const WHISPER_MODELS: [&str; 2] = ["small-q5", "base"];
+const STT_ENGINES: [&str; 3] = ["auto", "local", "cloud"];
 const STT_LANGS: [&str; 3] = ["auto", "fa", "en"];
 const AI_REASONING: [&str; 2] = ["fast", "deep"];
 const VOICES_FA: [&str; 2] = ["fa-IR-DilaraNeural", "fa-IR-FaridNeural"];
@@ -78,13 +79,14 @@ fn defaults() -> Map<String, Value> {
         "aiWakeWord": true,         // continuous RNNoise + Silero VAD wake-word listener ("Hello PILLVYN")
         "aiTtsAuto": true,          // automatically speak assistant replies via Edge TTS
         "aiFullAccess": true,       // allow full Windows system automation tools (PowerShell, apps, files, windows)
-        "aiModel": "nvidia/nemotron-3-ultra-550b-a55b:free",
-        "aiReasoning": "fast",      // "fast" (effort=none, ~1.4s) or "deep" (effort=low)
+        "aiModel": "gapgpt-gemma-26b-a4b",
+        "aiReasoning": "fast",      // "fast" (reasoning_effort=none) or "deep"
+        "aiSttEngine": "auto",      // "auto" (local Whisper + GapGPT Cloud fallback) | "local" | "cloud"
         "aiWhisperModel": "small-q5",
         "aiSttLang": "auto",        // "auto" | "fa" | "en"
         "aiTtsVoiceFa": "fa-IR-DilaraNeural",
         "aiTtsVoiceEn": "en-US-AvaMultilingualNeural",
-        "aiTtsRate": 0,             // Edge TTS speech speed percentage (-50..=100)
+        "aiTtsRate": 8,             // Edge TTS speech speed percentage (-50..=100)
         "aiTtsVolume": 90,          // Edge TTS playback volume percentage (0..=100)
         "netAlerts": true, "sensorDot": true, "smartCopy": true, "musicReact": true, "autoUpdate": true,
     })
@@ -147,16 +149,20 @@ pub fn load() {
         for (k, v) in saved {
             map.insert(k, v);
         }
-        // One-time seamless v3.4.0 upgrade migration from v3.3.0 defaults
-        if map.get("aiModel").and_then(Value::as_str) == Some("inclusionai/ling-3.2-flash:free") {
-            map.insert(
-                "aiModel".into(),
-                "nvidia/nemotron-3-ultra-550b-a55b:free".into(),
-            );
+        // One-time seamless v4.0.0 upgrade migration from v3.x models -> GapGPT Gemma 4 26B-A4B
+        if matches!(
+            map.get("aiModel").and_then(Value::as_str),
+            Some("inclusionai/ling-3.2-flash:free" | "nvidia/nemotron-3-ultra-550b-a55b:free")
+        ) {
+            map.insert("aiModel".into(), "gapgpt-gemma-26b-a4b".into());
             map.insert("aiWakeWord".into(), true.into());
             map.insert("aiFullAccess".into(), true.into());
+            map.insert("aiSttEngine".into(), "auto".into());
             if map.get("aiWhisperModel").and_then(Value::as_str) == Some("base") {
                 map.insert("aiWhisperModel".into(), "small-q5".into());
+            }
+            if map.get("aiTtsRate").and_then(Value::as_i64) == Some(0) {
+                map.insert("aiTtsRate".into(), 8.into());
             }
             migrated = true;
         }
@@ -188,6 +194,7 @@ pub fn payload() -> Value {
     let mut map = with(|m| m.clone());
     let masked = crate::ai::api_key_masked();
     map.insert("aiHasKey".into(), (!masked.is_empty()).into());
+    map.insert("aiCustomKey".into(), crate::ai::has_custom_api_key().into());
     map.insert("aiKeyMasked".into(), masked.into());
     map.insert("autoStartOn".into(), autostart_on().into());
     map.insert("version".into(), env!("CARGO_PKG_VERSION").into());
@@ -262,6 +269,11 @@ pub fn apply(key: &str, value: &Value) {
             if let Some(v) = value.as_str().filter(|v| WHISPER_MODELS.contains(v)) {
                 put(key, v.into());
                 crate::ai::stop_whisper();
+            }
+        }
+        "aiSttEngine" => {
+            if let Some(v) = value.as_str().filter(|v| STT_ENGINES.contains(v)) {
+                put(key, v.into());
             }
         }
         "aiSttLang" => {
@@ -393,16 +405,18 @@ mod tests {
         assert_eq!(d.get("notifSeconds").and_then(Value::as_i64), Some(4));
         assert_eq!(
             d.get("aiModel").and_then(Value::as_str),
-            Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+            Some("gapgpt-gemma-26b-a4b")
         );
         assert_eq!(d.get("aiWakeWord").and_then(Value::as_bool), Some(true));
         assert_eq!(d.get("aiFullAccess").and_then(Value::as_bool), Some(true));
+        assert_eq!(d.get("aiSttEngine").and_then(Value::as_str), Some("auto"));
         assert_eq!(
             d.get("aiWhisperModel").and_then(Value::as_str),
             Some("small-q5")
         );
         assert_eq!(d.get("aiReasoning").and_then(Value::as_str), Some("fast"));
         assert_eq!(d.get("aiSttLang").and_then(Value::as_str), Some("auto"));
+        assert_eq!(d.get("aiTtsRate").and_then(Value::as_i64), Some(8));
         assert_eq!(
             d.get("aiTtsVoiceEn").and_then(Value::as_str),
             Some("en-US-AvaMultilingualNeural")

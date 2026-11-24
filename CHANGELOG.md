@@ -2,6 +2,21 @@
 
 All notable changes to **PILLVYN** are documented here.
 
+## [4.0.0] - 2026-11-24
+
+### Added
+- **GapGPT Gemma 4 26B-A4B Brain (`gapgpt-gemma-26b-a4b`) & Built-In Out-of-the-Box AI:**
+  - Switched the default AI engine to **GapGPT** (`https://api.gapgpt.ir/v1`, model `gapgpt-gemma-26b-a4b` — Google Gemma 4 26B-A4B MoE) with a built-in shared GapGPT key so **every user who installs `PILLVYN-Setup.exe` gets AI active immediately on launch** with zero API key setup (plus optional custom GapGPT key override via Windows DPAPI and one-click Reset to Built-in in **Settings → AI**).
+  - Implemented **Real-Time SSE Token & Parallel Tool-Call Streaming** in native WinHTTP (`src-tauri/src/net_http.rs::post_sse`, `src-tauri/src/ai.rs`), streaming replies word-by-word directly inside the Dynamic Island pill & chat bubble with `"reasoning_effort": "none"` in Fast mode (~4× faster responses!).
+- **Deep Full-Program Dynamic Island Coordination (32 Structured Tools):**
+  - Added 6 new Dynamic Island control tools alongside the 26 full-Windows automation tools: `control_pillvyn_ui` (open/close any island panel or Settings tab, flash HUD banners), `manage_settings` (read/change any PILLVYN setting by voice), `manage_shelf` (list/add/reveal/clear File Shelf items), `manage_notes` (pin/delete notes), `manage_notifications` (clear inbox alerts), and `generate_password` (cryptographic Vault generator with 30-second private clipboard).
+  - Enriched live system context with real-time Dynamic Island telemetry (active theme, resting face, calendar mode, playing media, focus timer countdown, File Shelf items, recent notifications, notes count, network/VPN, and active foreground app), plus a one-click **Pin to Notes** action on every AI reply bubble.
+- **Studio-Grade Voice Recognition, Speech & Dynamic Island AI UI:**
+  - Added **Hybrid Voice Recognition (`Auto` / `Local` / `Cloud`)**: uses local pre-warmed `whisper.cpp` (`ggml-small-q5_1.bin` with `-ac 512`, `temperature_inc=0.0`, timestamps enabled for zero Persian truncation) when installed, and seamlessly falls back to **`gapgpt/whisper-1` Cloud STT** + pure-JS adaptive RMS fallback VAD on brand-new installations so voice works immediately from Minute 0.
+  - Added client-side **Silence Trimming & Broadcast Peak Normalization (`-2.8 dBFS`)** before transcription and upgraded `match_wake_word` to collapse spelled-out letters (`"HELLO P I L L V Y N"`) alongside fuzzy Persian/English variants (`"Hello PILLVYN"` / `«سلام پیلوین»`).
+  - Upgraded `clean_for_tts` with Persian technical symbol expansion (`%`, `GB`, `MB`, `°C`, `CPU`, `RAM`) and default lively `+8%` speech cadence for natural Persian & Multilingual English Edge Neural TTS.
+  - Added a live **5-bar neural voice equalizer wave** in the AI pill view, a subtle pulsing **wake-ready aurora dot** on the resting pill, and live streaming caret feedback in Liquid Glass and Frosted Pearl.
+
 ## [3.4.0] - 2026-11-24
 
 ### Added

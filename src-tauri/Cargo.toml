@@ -1,6 +1,6 @@
 [package]
 name = "pillvyn"
-version = "3.4.0"
+version = "4.0.0"
 edition = "2021"
 description = "PILLVYN — A sleek, lightweight Dynamic Island overlay for Windows"
 license = "MIT"

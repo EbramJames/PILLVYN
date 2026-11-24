@@ -1,10 +1,10 @@
-/* PILLVYN Ultra Voice AI Engine (v3.4.0):
- * - Software Mic Auto-Gain Control (AGC) + RNNoise WASM (48 kHz neural denoising)
- * - Silero VAD ONNX (16 kHz stateful neural voice activity detection & fast endpointing)
- * - Fuzzy bilingual Wake Word ("Hello PILLVYN" / "سلام پیلوین") + natural follow-up listening
- * - whisper.cpp Small-Q5 / Base auto Persian & English STT
- * - OpenRouter NVIDIA Nemotron 3 Ultra (free) with 26 full-system & PILLVYN tools
- * - Sentence-by-sentence streaming Edge TTS with concurrent prefetching
+/* PILLVYN v4.0.0 Ultra Voice AI Engine:
+ * - Zero-Wait Mic Pipeline: Software AGC + RNNoise WASM + Silero VAD ONNX (with instant RMS fallback VAD!)
+ * - Broadcast-Clean Audio Trimming & Peak Normalization before STT for top Persian & English accuracy
+ * - Hybrid STT: Local hot whisper.cpp (Small-Q5 / Base) + instant GapGPT Cloud fallback
+ * - Real-Time SSE Streaming from GapGPT (`gapgpt-gemma-26b-a4b`, fast `reasoning_effort=none`)
+ * - Full Dynamic Island coordination (32 tools: Windows + Panels + Settings + Shelf + Notes + Notifications + Vault)
+ * - Streaming sentence-by-sentence Microsoft Edge Neural TTS with concurrent prefetching & barge-in
  */
 (() => {
 'use strict';
@@ -15,9 +15,10 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const state = {
   status: {
     rnnoise: false, silero: false, whisperBin: false, whisperModel: false,
-    voiceReady: false, hasKey: false, keyMasked: '', installing: false,
-    assetUrl: '', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', modelId: 'small-q5',
-    fullAccess: true, reasoning: 'fast', sttLang: 'auto',
+    dspReady: false, localReady: false, localWhisperReady: false, cloudSttReady: true,
+    voiceReady: true, hasKey: true, customKey: false, keyMasked: 'Built-in GapGPT (Active)',
+    installing: false, assetUrl: '', model: 'gapgpt-gemma-26b-a4b', modelId: 'small-q5',
+    sttEngine: 'auto', fullAccess: true, reasoning: 'fast', sttLang: 'auto',
   },
   install: null,          // { step, pct, done, error }
   mode: 'idle',           // 'idle' | 'standby' | 'listening' | 'transcribing' | 'thinking' | 'speaking'
@@ -30,7 +31,8 @@ const state = {
   energy: 0,
   vadProb: 0,
   agcGain: 1,
-  activeTool: '',         // live tool name while Nemotron executes system tools
+  activeTool: '',         // live tool name while Gemma 4 executes tools
+  streamingText: '',      // live SSE token buffer while Gemma 4 streams response
   pillText: 'Say “Hello PILLVYN” or ask anything…',
   messages: [],           // [{ role: 'user'|'assistant'|'error', text, tools?, lang?, latencyMs?, ts }]
   audio: null,
@@ -38,7 +40,7 @@ const state = {
   busy: false,
 };
 
-// ------------------------------------------------------------ DSP: AGC + RNNoise WASM + Silero VAD ONNX
+// ------------------------------------------------------------ DSP: AGC + RNNoise WASM + Silero VAD ONNX (+ Instant Fallback VAD)
 let rnnMod = null, rnnCtx = 0, rnnPtr = 0;
 let ortSession = null, vadState = null, vadCtx = new Float32Array(64);
 let vadInputNames = [];
@@ -47,6 +49,7 @@ let pcm16Queue = [];
 let vadQueue = [];
 let vadProcessing = false;
 let agcPeak = 4800; // Smoothed mic peak tracker (Int16 scale)
+let noiseFloor = 0.015; // Adaptive RMS floor for instant pure-JS fallback VAD
 let speakGen = 0;   // Cancellation token for streaming sentence-by-sentence TTS
 
 // Utterance endpointing buffers (16 kHz mono float32)
@@ -81,47 +84,53 @@ function loadScriptOnce(src) {
   });
 }
 
-async function ensureDsp() {
-  if (state.dspReady) return true;
-  if (state.dspLoading) return false;
+let dspPromise = null;
+
+function ensureDsp() {
+  if (state.dspReady) return Promise.resolve(true);
+  if (dspPromise) return dspPromise;
   const base = state.status.assetUrl;
-  if (!base || !state.status.rnnoise || !state.status.silero) return false;
+  if (!base || !state.status.rnnoise || !state.status.silero) return Promise.resolve(false);
 
   state.dspLoading = true;
   state.dspError = '';
-  try {
-    // 1. Load official Xiph RNNoise WASM
-    const rnnExport = (await import(`${base}/rnnoise.js`)).default;
-    rnnMod = await rnnExport({ locateFile: (f) => `${base}/${f}` });
-    rnnCtx = rnnMod._rnnoise_create();
-    rnnPtr = rnnMod._malloc(480 * 4);
+  dspPromise = (async () => {
+    try {
+      // 1. Load official Xiph RNNoise WASM
+      const rnnExport = (await import(`${base}/rnnoise.js`)).default;
+      rnnMod = await rnnExport({ locateFile: (f) => `${base}/${f}` });
+      rnnCtx = rnnMod._rnnoise_create();
+      rnnPtr = rnnMod._malloc(480 * 4);
 
-    // 2. Load ONNX Runtime Web (single-threaded SIMD WASM — zero COOP/COEP headers required)
-    await loadScriptOnce(`${base}/ort.wasm.min.js`);
-    const ort = window.ort;
-    if (!ort) throw new Error('ONNX Runtime Web did not initialize');
-    ort.env.wasm.wasmPaths = `${base}/`;
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.proxy = false;
+      // 2. Load ONNX Runtime Web (single-threaded SIMD WASM — zero COOP/COEP headers required)
+      await loadScriptOnce(`${base}/ort.wasm.min.js`);
+      const ort = window.ort;
+      if (!ort) throw new Error('ONNX Runtime Web did not initialize');
+      ort.env.wasm.wasmPaths = `${base}/`;
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.proxy = false;
 
-    // 3. Load official Silero VAD ONNX model
-    ortSession = await ort.InferenceSession.create(`${base}/silero_vad.onnx`, {
-      executionProviders: ['wasm'],
-    });
-    vadInputNames = ortSession.inputNames || [];
-    vadState = new Float32Array(2 * 1 * 128);
-    vadCtx = new Float32Array(64);
-    state.dspReady = true;
-    notifyUi();
-    return true;
-  } catch (e) {
-    state.dspError = String(e && e.message || e);
-    state.dspReady = false;
-    notifyUi();
-    return false;
-  } finally {
-    state.dspLoading = false;
-  }
+      // 3. Load official Silero VAD ONNX model
+      ortSession = await ort.InferenceSession.create(`${base}/silero_vad.onnx`, {
+        executionProviders: ['wasm'],
+      });
+      vadInputNames = ortSession.inputNames || [];
+      vadState = new Float32Array(2 * 1 * 128);
+      vadCtx = new Float32Array(64);
+      state.dspReady = true;
+      notifyUi();
+      return true;
+    } catch (e) {
+      state.dspError = String(e && e.message || e);
+      state.dspReady = false;
+      notifyUi();
+      return false;
+    } finally {
+      state.dspLoading = false;
+      dspPromise = null;
+    }
+  })();
+  return dspPromise;
 }
 
 function b64ToInt16(b64) {
@@ -138,6 +147,37 @@ function uint8ToB64(bytes) {
     bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
   }
   return btoa(bin);
+}
+
+// Trim excess silence (preserving 160 ms clean padding) & peak-normalize to -2.8 dBFS (0.72)
+// so Whisper receives crisp, broadcast-level audio regardless of microphone distance.
+function prepareSpeechChunks(chunks) {
+  if (!chunks || !chunks.length) return [];
+  let first = 0, last = chunks.length - 1;
+  const rmsOf = (arr) => {
+    let s = 0;
+    for (let i = 0; i < arr.length; i++) s += arr[i] * arr[i];
+    return Math.sqrt(s / (arr.length || 1));
+  };
+  while (first < last && rmsOf(chunks[first]) < 0.012) first++;
+  while (last > first && rmsOf(chunks[last]) < 0.012) last--;
+  const pad = 5; // 5 * 32ms = 160ms padding so initial/final consonants stay intact
+  const slice = chunks.slice(Math.max(0, first - pad), Math.min(chunks.length, last + pad + 1));
+
+  let peak = 0;
+  for (const c of slice) {
+    for (let i = 0; i < c.length; i++) {
+      const a = Math.abs(c[i]);
+      if (a > peak) peak = a;
+    }
+  }
+  if (peak < 0.008) return slice;
+  const normGain = clamp(0.72 / peak, 0.8, 4.0);
+  return slice.map((c) => {
+    const out = new Float32Array(c.length);
+    for (let i = 0; i < c.length; i++) out[i] = clamp(c[i] * normGain, -0.98, 0.98);
+    return out;
+  });
 }
 
 function encodeWav16k(chunks) {
@@ -179,45 +219,45 @@ function updateLiveMeters() {
       : state.vadProb >= VAD_START_THRESH
         ? `Speech (${Math.round(state.vadProb * 100)}%)`
         : state.mode === 'standby'
-          ? `Wake ready (${state.agcGain.toFixed(1)}×)`
+          ? `Wake ready (${state.agcGain.toFixed(1)}×${state.dspReady ? '' : ' · RMS'})`
           : `Listening (${Math.round(state.vadProb * 100)}%)`;
   }
 }
 
-// Feed raw 48 kHz Int16 PCM from native Rust WASAPI mic -> AGC -> RNNoise -> 16 kHz -> Silero VAD
+// Feed raw 48 kHz Int16 PCM from native Rust WASAPI mic -> AGC -> (RNNoise if ready) -> 16 kHz -> (Silero VAD or instant RMS VAD)
 function onRawPcm(b64) {
   // Acoustic echo guard: never process mic while Edge TTS is speaking or whisper/LLM is busy
   if (state.mode === 'speaking' || state.mode === 'transcribing' || state.mode === 'thinking' || state.busy) return;
   if (state.mode !== 'listening' && state.mode !== 'standby') return;
-  if (!state.dspReady || !rnnMod || !ortSession) return;
 
   const samples = b64ToInt16(b64);
   for (let i = 0; i < samples.length; i++) pcm48Queue.push(samples[i]);
 
-  // Process exact 480-sample (10ms @ 48 kHz) frames through AGC + RNNoise WASM
+  // Process exact 480-sample (10ms @ 48 kHz) frames through AGC + optional RNNoise WASM
   while (pcm48Queue.length >= 480) {
     let framePeak = 0;
     for (let i = 0; i < 480; i++) {
       const a = Math.abs(pcm48Queue[i]);
       if (a > framePeak) framePeak = a;
     }
-    // Smooth peak envelope: fast attack for loud sounds, slow release for quiet USB mics
     if (framePeak > agcPeak) agcPeak = agcPeak * 0.65 + framePeak * 0.35;
     else agcPeak = agcPeak * 0.988 + framePeak * 0.012;
-    // Boost quiet speech cleanly (floor 2800 prevents amplifying dead-room noise hiss)
     const gain = clamp(12000 / Math.max(agcPeak, 2800), 1.0, 3.5);
     state.agcGain = gain;
 
     const f32 = new Float32Array(480);
     for (let i = 0; i < 480; i++) {
-      f32[i] = clamp(pcm48Queue[i] * gain, -32700, 32700); // RNNoise expects [-32768, 32767]
+      f32[i] = clamp(pcm48Queue[i] * gain, -32700, 32700);
     }
     pcm48Queue.splice(0, 480);
 
-    const heapOff = rnnPtr >> 2;
-    rnnMod.HEAPF32.set(f32, heapOff);
-    rnnMod._rnnoise_process_frame(rnnCtx, rnnPtr, rnnPtr);
-    const clean48 = rnnMod.HEAPF32.subarray(heapOff, heapOff + 480);
+    let clean48 = f32;
+    if (state.dspReady && rnnMod) {
+      const heapOff = rnnPtr >> 2;
+      rnnMod.HEAPF32.set(f32, heapOff);
+      rnnMod._rnnoise_process_frame(rnnCtx, rnnPtr, rnnPtr);
+      clean48 = rnnMod.HEAPF32.subarray(heapOff, heapOff + 480);
+    }
 
     // 3-tap low-pass decimation 48 kHz -> 16 kHz (160 samples per 10ms) + live energy meter
     let sq = 0;
@@ -228,12 +268,12 @@ function onRawPcm(b64) {
       sq += v * v;
     }
     const rms = Math.sqrt(sq / 160);
-    state.energy = state.energy * 0.62 + clamp(rms * 14, 0, 1) * 0.38;
+    state.energy = state.energy * 0.60 + clamp(rms * 14, 0, 1) * 0.40;
     if (state.active) updateOrbEnergy();
     updateLiveMeters();
   }
 
-  // Pack 512-sample (32 ms @ 16 kHz) frames for Silero VAD ONNX
+  // Pack 512-sample (32 ms @ 16 kHz) frames for Silero VAD ONNX (or instant adaptive RMS VAD fallback)
   while (pcm16Queue.length >= 512) {
     const frame512 = new Float32Array(512);
     for (let i = 0; i < 512; i++) frame512[i] = pcm16Queue[i];
@@ -244,11 +284,19 @@ function onRawPcm(b64) {
 }
 
 async function runSileroFrame(frame512) {
+  if (!state.dspReady || !ortSession) {
+    // Pure-JS adaptive RMS energy fallback VAD so Mic works immediately on fresh installs
+    let sq = 0;
+    for (let i = 0; i < frame512.length; i++) sq += frame512[i] * frame512[i];
+    const rms = Math.sqrt(sq / frame512.length);
+    if (rms < noiseFloor * 1.4) noiseFloor = noiseFloor * 0.96 + Math.max(0.006, rms) * 0.04;
+    const ratio = rms / Math.max(noiseFloor, 0.012);
+    return clamp((ratio - 1.4) / 3.2, 0, 1);
+  }
   const ort = window.ort;
   const usesV5 = vadInputNames.includes('state');
   let feeds;
   if (usesV5) {
-    // Official Silero VAD v5 expects 64-sample previous context + 512 samples = 576
     const withCtx = new Float32Array(576);
     withCtx.set(vadCtx, 0);
     withCtx.set(frame512, 64);
@@ -333,19 +381,18 @@ async function drainVadQueue() {
   }
 }
 
-// ------------------------------------------------------------ STT -> Wake Word -> Nemotron 3 Ultra -> Edge TTS
+// ------------------------------------------------------------ STT -> Wake Word -> GapGPT Gemma 4 (SSE) -> Edge TTS
 async function handleFinishedUtterance(chunks, wasStandby) {
   state.busy = true;
-  const wavB64 = encodeWav16k(chunks);
+  const prepared = prepareSpeechChunks(chunks);
+  const wavB64 = encodeWav16k(prepared);
   try {
     if (!wasStandby) {
       setMode('transcribing', 'Transcribing…');
     }
     const stt = await window.pillvyn.aiTranscribe(wavB64);
     if (!stt || !stt.ok || !stt.text) {
-      if (wasStandby) {
-        return;
-      }
+      if (wasStandby) return;
       setMode('listening', stt && stt.error ? stt.error : 'Didn’t catch that — try again');
       armListenTimeout(8000);
       return;
@@ -359,7 +406,7 @@ async function handleFinishedUtterance(chunks, wasStandby) {
       const cmd = (stt.wakeCommand || '').trim();
       state.active = true;
       if (pv) {
-        pv.st.holdUntil = Date.now() + 18000;
+        pv.st.holdUntil = Date.now() + 20000;
         pv.setStack(true, 'ai');
         pv.render();
       }
@@ -372,7 +419,6 @@ async function handleFinishedUtterance(chunks, wasStandby) {
       return;
     }
 
-    // Active listening mode: strip accidental repeated wake prefix if present
     const finalText = stt.wakeMatched && stt.wakeCommand ? stt.wakeCommand.trim() : spoken;
     if (!finalText) {
       setMode('listening', 'Listening…');
@@ -392,8 +438,18 @@ function liveClientContext() {
   const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const date = $('#t-date') ? $('#t-date').textContent : d.toDateString();
   const m = pv && pv.st && pv.st.media;
-  const media = m && m.active ? `${m.title || ''}${m.artist ? ' - ' + m.artist : ''}` : '';
-  return { time, date, media };
+  const media = m && m.active ? `${m.title || ''}${m.artist ? ' - ' + m.artist : ''}${m.playing ? ' (playing)' : ' (paused)'}` : '';
+  let timer = 'idle';
+  if (pv && pv.timer) {
+    const leftMs = pv.timer.running ? Math.max(0, pv.timer.endAt - Date.now()) : pv.timer.left;
+    const mins = Math.floor(leftMs / 60000), secs = Math.floor((leftMs % 60000) / 1000);
+    if (pv.timer.running) timer = `running (${mins}m ${secs}s left)`;
+    else if (pv.timer.done) timer = 'finished';
+  }
+  const n = pv && pv.st && pv.st.net;
+  const net = n ? (!n.online ? 'offline' : n.vpn ? 'VPN: ' + n.vpn : n.proxy ? 'proxy' : 'online') : 'online';
+  const hist = (pv && typeof pv.recentNotifs === 'function') ? pv.recentNotifs() : '';
+  return { time, date, media, timer, net, notifs: hist };
 }
 
 async function sendText(raw, opts = {}) {
@@ -403,10 +459,11 @@ async function sendText(raw, opts = {}) {
   clearTimeout(state.listenTimeout);
   state.active = true;
   state.activeTool = '';
+  state.streamingText = '';
 
   const pv = window.__pillvyn;
   if (pv) {
-    pv.st.holdUntil = Date.now() + 25000;
+    pv.st.holdUntil = Date.now() + 28000;
     pv.render();
   }
 
@@ -419,9 +476,10 @@ async function sendText(raw, opts = {}) {
   const res = await window.pillvyn.aiChat(text, liveClientContext());
   const latencyMs = Number(res && res.ms) || Math.round(performance.now() - t0);
   state.activeTool = '';
+  state.streamingText = '';
 
   if (!res || !res.ok) {
-    const err = (res && res.error) || 'Could not reach OpenRouter';
+    const err = (res && res.error) || 'Could not reach GapGPT';
     state.messages.push({ role: 'error', text: err, ts: Date.now() });
     setMode(wantStandby() ? 'standby' : 'idle', err);
     notifyUi();
@@ -450,8 +508,8 @@ async function sendText(raw, opts = {}) {
     setMode(wantStandby() ? 'standby' : 'idle', reply);
   }
 
-  // Smooth conversational follow-up: after answering a voice request, stay listening for 7s
-  if (opts.fromVoice && spokeCleanly && state.active && state.status.voiceReady && state.dspReady) {
+  // Natural conversational follow-up: after answering a voice request, stay listening for 7s
+  if (opts.fromVoice && spokeCleanly && state.active && state.status.voiceReady) {
     resetVadEndpoint();
     setMode('listening', 'Listening for follow-up…');
     armListenTimeout(7000);
@@ -461,12 +519,11 @@ async function sendText(raw, opts = {}) {
 
 // ------------------------------------------------------------ Sentence-by-Sentence Streaming Edge TTS
 function splitSentences(raw) {
-  // Light client cleanup (Rust clean_for_tts also strips markdown/emojis/URLs thoroughly)
   const cleaned = String(raw || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/[*_`~#>]+/g, ' ')
+    .replace(/[*_`~#>•▪◦]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return [];
@@ -480,7 +537,6 @@ function splitSentences(raw) {
     if (sameScript && (prev.length < 24 || p.length < 22) && prev.length + p.length < 240) {
       chunks[chunks.length - 1] += ' ' + p;
     } else if (p.length > 260) {
-      // Split overly long sentences at commas/clauses so playback starts fast
       const subs = p.split(/(?<=[,،;؛:])\s+/);
       let acc = '';
       for (const sub of subs) {
@@ -543,7 +599,7 @@ async function speak(text, opts = {}) {
   const pv = window.__pillvyn;
   const s = (pv && pv.st && pv.st.settings) || {};
   const vol = opts.volume !== undefined ? opts.volume : (Number.isFinite(Number(s.aiTtsVolume)) ? Number(s.aiTtsVolume) : 90);
-  const rate = opts.rate !== undefined ? opts.rate : (Number.isFinite(Number(s.aiTtsRate)) ? Number(s.aiTtsRate) : 0);
+  const rate = opts.rate !== undefined ? opts.rate : (Number.isFinite(Number(s.aiTtsRate)) ? Number(s.aiTtsRate) : 8);
   const voice = opts.voice || null;
 
   const chunks = opts.single ? [clean] : splitSentences(clean);
@@ -560,7 +616,6 @@ async function speak(text, opts = {}) {
     const curRes = await nextPromise;
     if (myGen !== speakGen) return { ok: false, cancelled: true };
 
-    // Prefetch the next sentence immediately while playing the current sentence!
     if (i + 1 < chunks.length) {
       nextPromise = window.pillvyn.aiTts(chunks[i + 1], voice, rate, vol);
     }
@@ -582,19 +637,23 @@ async function speak(text, opts = {}) {
 function wantStandby() {
   const pv = window.__pillvyn;
   const wakeOn = !pv || !pv.st || !pv.st.settings ? true : pv.st.settings.aiWakeWord !== false;
-  return !!(wakeOn && state.status.voiceReady);
+  // Standby wake word runs continuously when neural DSP (RNNoise + Silero) is installed
+  return !!(wakeOn && state.status.rnnoise && state.status.silero);
 }
 
 function syncMicWant() {
-  const needMic = (state.mode === 'listening' || state.mode === 'standby') && state.status.voiceReady;
-  if (needMic && !state.dspReady && !state.dspLoading) {
-    ensureDsp().then((ok) => {
-      if (ok && (state.mode === 'listening' || state.mode === 'standby')) {
+  const wantListen = state.mode === 'listening' && state.status.voiceReady;
+  const wantWake = state.mode === 'standby' && state.status.rnnoise && state.status.silero;
+  const needMic = wantListen || wantWake;
+  if (needMic && state.status.rnnoise && state.status.silero && !state.dspReady && !state.dspLoading) {
+    ensureDsp().then(() => {
+      if (state.mode === 'listening' || state.mode === 'standby') {
         window.pillvyn.aiSetMic(true);
       }
     });
+    if (wantListen) window.pillvyn.aiSetMic(true); // instant RMS VAD fallback while DSP initializes
   } else {
-    window.pillvyn.aiSetMic(needMic && state.dspReady);
+    window.pillvyn.aiSetMic(needMic && (state.dspReady || wantListen));
   }
 }
 
@@ -620,21 +679,25 @@ function setMode(next, text) {
   state.mode = next;
   if (text !== undefined) setPillText(text);
   const orb = $('#ai-orb');
+  const wave = $('#ai-wave');
   const lbl = $('#ai-pill-state');
   const stopBtn = $('#ai-pill-stop');
   const micBtn = $('#ai-pill-mic');
+  const wakeDot = $('#i-wake');
   if (orb) orb.className = next;
+  if (wave) wave.className = 'ai-wave ' + next;
   if (lbl) {
     lbl.textContent =
       next === 'listening' ? 'Listening'
-      : next === 'transcribing' ? 'Whisper'
-      : next === 'thinking' ? (state.activeTool ? 'Action' : 'Nemotron')
+      : next === 'transcribing' ? 'Voice'
+      : next === 'thinking' ? (state.activeTool ? 'Action' : state.streamingText ? 'Live' : 'Gemma 4')
       : next === 'speaking' ? 'Speaking'
       : next === 'standby' ? 'Wake Ready'
       : 'PILLVYN AI';
   }
   if (stopBtn) stopBtn.classList.toggle('hidden', next !== 'speaking');
   if (micBtn) micBtn.classList.toggle('active', next === 'listening');
+  if (wakeDot) wakeDot.classList.toggle('on', next === 'standby' || next === 'listening');
   const tBtn = $('#t-ai');
   if (tBtn) tBtn.classList.toggle('ai-live', next === 'standby' || next === 'listening' || next === 'speaking');
   syncMicWant();
@@ -643,9 +706,10 @@ function setMode(next, text) {
 
 function updateOrbEnergy() {
   const orb = $('#ai-orb');
-  if (!orb) return;
   const sc = (1 + state.energy * 0.48).toFixed(3);
-  orb.style.setProperty('--e', sc);
+  if (orb) orb.style.setProperty('--e', sc);
+  const wave = $('#ai-wave');
+  if (wave) wave.style.setProperty('--lvl', clamp(state.energy, 0.08, 1).toFixed(3));
 }
 
 function notifyUi() {
@@ -663,18 +727,12 @@ async function startListening() {
   state.active = true;
   const pv = window.__pillvyn;
   if (pv) {
-    pv.st.holdUntil = Date.now() + 18000;
+    pv.st.holdUntil = Date.now() + 20000;
     pv.render();
   }
-  if (!state.status.voiceReady) {
-    setMode('idle', 'Set up local voice engine to speak');
-    if (pv) pv.setStack(true, 'ai');
-    return;
-  }
-  const ok = await ensureDsp();
-  if (!ok) {
-    setMode('idle', state.dspError || 'DSP engine failed to load');
-    return;
+  // Load neural RNNoise + Silero DSP if installed; otherwise instant RMS fallback VAD still captures speech!
+  if (state.status.rnnoise && state.status.silero) {
+    await ensureDsp();
   }
   resetVadEndpoint();
   setMode('listening', 'Listening… speak Persian or English');
@@ -695,7 +753,7 @@ function openPanel(listenNow) {
   state.active = true;
   const pv = window.__pillvyn;
   if (pv) {
-    pv.st.holdUntil = Date.now() + 20000;
+    pv.st.holdUntil = Date.now() + 24000;
     pv.setStack(true, 'ai');
     pv.render();
   }
@@ -708,6 +766,7 @@ function closeAll() {
   clearTimeout(state.listenTimeout);
   stopSpeaking();
   state.active = false;
+  state.streamingText = '';
   setMode(wantStandby() ? 'standby' : 'idle', 'Say “Hello PILLVYN” or ask anything…');
   const pv = window.__pillvyn;
   if (pv) {
@@ -718,6 +777,7 @@ function closeAll() {
 
 function clearChat() {
   state.messages = [];
+  state.streamingText = '';
   window.pillvyn.aiClear();
   setPillText('Conversation cleared');
   notifyUi();
@@ -749,7 +809,7 @@ $('#ai-pill-stop').addEventListener('click', stopSpeaking);
 $('#ai-pill-chat').addEventListener('click', () => {
   const pv = window.__pillvyn;
   if (!pv) return;
-  pv.st.holdUntil = Date.now() + 18000;
+  pv.st.holdUntil = Date.now() + 20000;
   pv.setStack(!(pv.st.stackOpen && pv.st.stackKind === 'ai'), 'ai');
 });
 $('#ai-pill-close').addEventListener('click', closeAll);
@@ -791,6 +851,23 @@ window.pillvyn.onAiTool((t) => {
     notifyUi();
   }
 });
+window.pillvyn.onAiStream((ev) => {
+  if (!ev || typeof ev.text !== 'string') return;
+  state.streamingText = ev.text;
+  state.activeTool = '';
+  const preview = ev.text.replace(/\s+/g, ' ').trim();
+  if (preview) setPillText(preview);
+  const lbl = $('#ai-pill-state');
+  if (lbl && state.mode === 'thinking') lbl.textContent = 'Live';
+  const liveEl = $('#ai-stream-txt');
+  if (liveEl) {
+    liveEl.textContent = ev.text;
+    const list = $('#stack-list');
+    if (list) list.scrollTop = list.scrollHeight;
+  } else {
+    notifyUi();
+  }
+});
 window.pillvyn.onAiAction((act) => {
   const pv = window.__pillvyn;
   if (!pv || !act) return;
@@ -819,6 +896,27 @@ window.pillvyn.onAiAction((act) => {
     }
     pv.tick();
     pv.render();
+  } else if (act.type === 'ui') {
+    if (act.hudTitle && typeof pv.showHud === 'function') {
+      pv.showHud('ai', act.hudTitle, act.hudText || '', 3000, 'pop');
+    }
+    if (act.settingsTab) {
+      pv.st.settingsTab = act.settingsTab;
+      pv.st.holdUntil = Date.now() + 12000;
+      pv.setStack(true, 'settings');
+    } else if (act.panel === 'close') {
+      pv.setStack(false);
+    } else if (act.panel === 'timer') {
+      pv.st.manual = 'timer';
+      pv.st.holdUntil = Date.now() + 10000;
+      pv.render();
+    } else if (act.panel) {
+      const mapped = act.panel === 'inbox' ? 'notifs' : act.panel === 'shelf' ? 'files' : act.panel;
+      pv.st.holdUntil = Date.now() + 12000;
+      pv.setStack(true, mapped);
+    }
+  } else if (act.type === 'clear_notifs' && typeof pv.clearNotifs === 'function') {
+    pv.clearNotifs();
   }
 });
 
@@ -839,6 +937,7 @@ window.pillvynAi = {
   stopSpeaking,
   clearChat,
   splitSentences,
+  prepareSpeechChunks,
   syncStandby() {
     if (wantStandby() && state.mode === 'idle') setMode('standby', state.pillText);
     else if (!wantStandby() && state.mode === 'standby') setMode('idle', state.pillText);

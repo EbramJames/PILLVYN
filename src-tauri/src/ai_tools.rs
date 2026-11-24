@@ -27,7 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HWND_BROADCAST, SC_MONITORPOWER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CLOSE, WM_SYSCOMMAND,
 };
 
-use crate::{audio, clip, hit, net_http, ocr, poll, settings, store, sys};
+use crate::{audio, clip, hit, net_http, ocr, poll, settings, shelf, store, sys};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -190,6 +190,97 @@ pub fn tool_definitions(full_access: bool) -> Value {
                     "type": "object",
                     "properties": { "query": { "type": "string", "description": "Search query in English or Persian" } },
                     "required": ["query"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "control_pillvyn_ui",
+                "description": "Open or close any PILLVYN Dynamic Island panel (settings, notes, clips, shelf, inbox, vault, tour, timer, ai, close), jump to a Settings tab (appearance, behavior, features, ai, about), or show a quick HUD banner on the island.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "panel": { "type": "string", "enum": ["ai", "settings", "notes", "clips", "shelf", "inbox", "vault", "tour", "timer", "close"] },
+                        "settings_tab": { "type": "string", "enum": ["appearance", "behavior", "features", "ai", "about"] },
+                        "hud_title": { "type": "string", "description": "Optional short HUD banner title to flash on the pill" },
+                        "hud_text": { "type": "string", "description": "Optional short HUD banner subtitle" }
+                    }
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "manage_settings",
+                "description": "Read or change ANY PILLVYN setting directly: skin, face (eyes/clock/logo), calendar (gregorian/shamsi/shamsi-fa/both), shimmer, sounds, musicReact, autoHide, hideVideo, topOffset (0-24), notifSeconds (2-15), aiWakeWord, aiFullAccess, aiReasoning (fast/deep), aiSttLang (auto/fa/en), aiSttEngine (auto/local/cloud), aiTtsAuto, aiTtsRate (-50..100), aiTtsVolume (0..100), aiTtsVoiceFa, aiTtsVoiceEn.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["get", "set"] },
+                        "key": { "type": "string", "description": "Setting key name" },
+                        "value": { "description": "New value (boolean, number, or string) when action is 'set'" }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "manage_shelf",
+                "description": "Control PILLVYN's Dynamic Island File Shelf: list parked files, add a file path onto the shelf, reveal a parked file in Explorer, or clear the shelf.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["list", "add", "reveal", "clear"] },
+                        "path": { "type": "string", "description": "File path (supports Desktop/Downloads/Documents prefixes) for add or reveal" }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "manage_notes",
+                "description": "Pin/unpin or delete an existing PILLVYN quick note by numeric id or text search match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["pin", "delete"] },
+                        "id": { "type": "number", "description": "Note id from list_notes" },
+                        "query": { "type": "string", "description": "Fallback substring match if id is omitted" }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "manage_notifications",
+                "description": "Clear notifications from PILLVYN's Dynamic Island inbox.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["clear"] }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "generate_password",
+                "description": "Generate a cryptographically strong password using PILLVYN's Vault generator and copy it privately to the clipboard (auto-clears after 30 seconds).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "length": { "type": "number", "description": "Length between 8 and 40 (default 18)" },
+                        "symbols": { "type": "boolean", "description": "Include symbols (default true)" }
+                    }
                 }
             }
         }),
@@ -521,6 +612,167 @@ pub fn execute_tool(name: &str, args: &Value, full_access: bool) -> (String, Str
         "web_search" => {
             let q = args["query"].as_str().unwrap_or("").trim();
             (web_search_exec(q).to_string(), "Web search".into())
+        }
+        "control_pillvyn_ui" => {
+            let panel = args["panel"].as_str().unwrap_or("");
+            let tab = args["settings_tab"].as_str().unwrap_or("");
+            let hud_title = args["hud_title"].as_str().unwrap_or("");
+            let hud_text = args["hud_text"].as_str().unwrap_or("");
+            sys::emit(
+                "ai-action",
+                json!({
+                    "type": "ui",
+                    "panel": panel,
+                    "settingsTab": tab,
+                    "hudTitle": hud_title,
+                    "hudText": hud_text,
+                }),
+            );
+            let badge = if !panel.is_empty() {
+                format!("UI → {panel}")
+            } else if !tab.is_empty() {
+                format!("Settings → {tab}")
+            } else {
+                "Island HUD".into()
+            };
+            (
+                json!({ "ok": true, "panel": panel, "settings_tab": tab }).to_string(),
+                badge,
+            )
+        }
+        "manage_settings" => {
+            let act = args["action"].as_str().unwrap_or("get");
+            let key = args["key"].as_str().unwrap_or("").trim();
+            if act == "set" && !key.is_empty() {
+                let val = &args["value"];
+                settings::apply(key, val);
+                let updated = settings::get(key);
+                (
+                    json!({ "ok": true, "key": key, "value": updated }).to_string(),
+                    format!("Set {key}"),
+                )
+            } else if !key.is_empty() {
+                (
+                    json!({ "ok": true, "key": key, "value": settings::get(key) }).to_string(),
+                    format!("Read {key}"),
+                )
+            } else {
+                let mut snap = settings::payload();
+                if let Some(obj) = snap.as_object_mut() {
+                    obj.remove("aiKeyMasked");
+                }
+                (snap.to_string(), "Read settings".into())
+            }
+        }
+        "manage_shelf" => {
+            let act = args["action"].as_str().unwrap_or("list");
+            match act {
+                "clear" => {
+                    shelf::clear();
+                    (
+                        json!({ "ok": true, "cleared": true }).to_string(),
+                        "Shelf cleared".into(),
+                    )
+                }
+                "add" => {
+                    let p = resolve_user_path(args["path"].as_str().unwrap_or(""));
+                    let p_str = p.to_string_lossy().to_string();
+                    let exists = p.exists();
+                    if exists {
+                        let list = shelf::add(vec![p_str.clone()]);
+                        sys::emit("shelf", list);
+                        let nm = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                        (
+                            json!({ "ok": true, "added": p_str }).to_string(),
+                            format!("Shelved {nm}"),
+                        )
+                    } else {
+                        (
+                            json!({ "ok": false, "error": format!("file not found: {p_str}") })
+                                .to_string(),
+                            "Shelf file missing".into(),
+                        )
+                    }
+                }
+                "reveal" => {
+                    let p = resolve_user_path(args["path"].as_str().unwrap_or(""));
+                    let p_str = p.to_string_lossy().to_string();
+                    shelf::reveal(&p_str);
+                    (
+                        json!({ "ok": true, "path": p_str }).to_string(),
+                        "Revealed file".into(),
+                    )
+                }
+                _ => {
+                    let raw = shelf::list();
+                    let compact: Vec<Value> = raw
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|f| json!({ "name": f["name"], "path": f["path"] }))
+                        .collect();
+                    (
+                        json!({ "ok": true, "files": compact }).to_string(),
+                        "Listed shelf".into(),
+                    )
+                }
+            }
+        }
+        "manage_notes" => {
+            let act = args["action"].as_str().unwrap_or("pin");
+            let mut target_id = args["id"].as_u64();
+            if target_id.is_none() {
+                let q = args["query"].as_str().unwrap_or("").trim().to_lowercase();
+                if !q.is_empty() {
+                    if let Some(arr) = store::notes().as_array() {
+                        target_id = arr.iter().find_map(|n| {
+                            n["text"]
+                                .as_str()
+                                .filter(|t| t.to_lowercase().contains(&q))
+                                .and_then(|_| n["id"].as_u64())
+                        });
+                    }
+                }
+            }
+            match (act, target_id) {
+                ("delete", Some(id)) => {
+                    store::note_remove(id);
+                    (
+                        json!({ "ok": true, "deleted_id": id }).to_string(),
+                        "Deleted note".into(),
+                    )
+                }
+                ("pin", Some(id)) => {
+                    store::note_pin(id);
+                    (
+                        json!({ "ok": true, "toggled_pin_id": id }).to_string(),
+                        "Pinned note".into(),
+                    )
+                }
+                _ => (
+                    json!({ "ok": false, "error": "note not found — call list_notes first" })
+                        .to_string(),
+                    "Note not found".into(),
+                ),
+            }
+        }
+        "manage_notifications" => {
+            poll::send(poll::Cmd::ClearAll);
+            sys::emit("ai-action", json!({ "type": "clear_notifs" }));
+            (
+                json!({ "ok": true, "cleared": true }).to_string(),
+                "Cleared alerts".into(),
+            )
+        }
+        "generate_password" => {
+            let len = args["length"].as_u64().unwrap_or(18).clamp(8, 40) as usize;
+            let symbols = args["symbols"].as_bool().unwrap_or(true);
+            let pw = store::generate(len, symbols);
+            let copied = store::copy_secret(&pw);
+            (
+                json!({ "ok": true, "length": pw.len(), "copied_private_30s": copied }).to_string(),
+                format!("Password ({len}ch)"),
+            )
         }
 
         // ---- Full-access system tools ----
@@ -1402,7 +1654,7 @@ mod tests {
     fn full_access_exposes_all_system_and_pillvyn_tools() {
         let full = tool_definitions(true);
         let arr = full.as_array().unwrap();
-        assert!(arr.len() >= 24);
+        assert!(arr.len() >= 30, "expected >= 30 tools, got {}", arr.len());
         for req in [
             "run_powershell",
             "launch_app",
@@ -1413,6 +1665,12 @@ mod tests {
             "web_search",
             "set_timer",
             "switch_theme",
+            "control_pillvyn_ui",
+            "manage_settings",
+            "manage_shelf",
+            "manage_notes",
+            "manage_notifications",
+            "generate_password",
         ] {
             assert!(
                 arr.iter().any(|t| t["function"]["name"] == req),

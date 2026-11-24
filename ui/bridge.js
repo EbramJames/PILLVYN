@@ -14,7 +14,7 @@ window.pillvyn = {
   onCursor: on('cursor'), onHelper: on('helper'), onSettings: on('settings'), onClip: on('clip'), onDownload: on('download'),
   onShelf: on('shelf'), onShelfDragging: on('shelf-dragging'), onClips: on('clips'), onLevels: on('levels'),
   onPress: on('press'), onRelease: on('release'), onOpen: on('open'), onHotkey: on('hotkey'), onNotes: on('notes'), onVault: on('vault'), onOcr: on('ocr'), onOcrRead: on('ocr-read'), onSpeedo: on('speedo'),
-  onAiPcm: on('ai-pcm'), onAiMic: on('ai-mic'), onAiInstall: on('ai-install'), onAiStatus: on('ai-status'), onAiTool: on('ai-tool'), onAiAction: on('ai-action'),
+  onAiPcm: on('ai-pcm'), onAiMic: on('ai-mic'), onAiInstall: on('ai-install'), onAiStatus: on('ai-status'), onAiTool: on('ai-tool'), onAiAction: on('ai-action'), onAiStream: on('ai-stream'),
 
   setInteractive: (v) => quiet(invoke('set_interactive', { on: !!v })),
   setTyping: (v, restore) => invoke('set_typing', { on: !!v, restore: !!restore }).catch(() => ({})),

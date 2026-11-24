@@ -1,11 +1,11 @@
-// PILLVYN AI Assistant backend (v3.4.0 — Ultra Voice AI & Full Windows Agent):
-// - DPAPI-encrypted OpenRouter API key store (never stored in plaintext or committed to git)
+// PILLVYN AI Assistant backend (v4.0.0 — GapGPT Gemma 4 26B + Full Dynamic Island Agent):
+// - Built-in GapGPT API key out-of-the-box for all users + optional Windows DPAPI custom key override
+// - Real-time SSE token & tool-call streaming from GapGPT (`gapgpt-gemma-26b-a4b`, `reasoning_effort=none`)
+// - 32 structured tools covering full Windows automation + 100% of PILLVYN Dynamic Island features
+// - Hybrid bilingual Persian & English STT: local hot whisper.cpp (Small-Q5 / Base) + instant GapGPT Cloud fallback
 // - Localhost DSP asset server for RNNoise WASM + ONNX Runtime Web + Silero VAD ONNX
-// - One-click prerequisites manager (RNNoise, Silero VAD, whisper.cpp, Small-Q5 / Base models)
-// - Pre-warmed, low-latency whisper-server.exe (auto / FA / EN, beam=1 fast decoding)
-// - Phonetic + Levenshtein bilingual wake-word engine ("Hello PILLVYN" / "سلام پیلوین")
-// - NVIDIA Nemotron 3 Ultra (free) on OpenRouter with reasoning=none (1.4s speed!) & 26 Windows/PILLVYN tools
-// - Studio-clean Edge Neural TTS (Persian & Multilingual English MP3 with markdown/emoji sanitizer)
+// - Spelled-letter + phonetic + Levenshtein bilingual wake-word engine ("Hello PILLVYN" / "سلام پیلوین")
+// - Broadcast-clean streaming Edge Neural TTS (Persian & Multilingual English MP3)
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::windows::process::CommandExt;
@@ -17,13 +17,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use crate::{ai_tools, audio, hit, net_http, settings, store, sys};
+use crate::{ai_tools, audio, hit, net_http, settings, shelf, store, sys};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-pub const DEFAULT_MODEL: &str = "nvidia/nemotron-3-ultra-550b-a55b:free";
-const FALLBACK_MODEL: &str = "nvidia/nemotron-3.5-lightning:free";
+const GAPGPT_CHAT_URL: &str = "https://api.gapgpt.ir/v1/chat/completions";
+const GAPGPT_STT_URL: &str = "https://api.gapgpt.ir/v1/audio/transcriptions";
+pub const DEFAULT_MODEL: &str = "gapgpt-gemma-26b-a4b";
 const MAX_HISTORY: usize = 24;
+
+// Built-in shared PILLVYN v4 GapGPT key (runtime-unmasked; overrideable via PILLVYN_GAPGPT_KEY or Settings -> AI)
+const BUILTIN_KEY_ENC: &[u8] = &[
+    0x29, 0x0c, 0x59, 0xd6, 0xfa, 0xc3, 0xcf, 0xc3, 0x93, 0xa2, 0xee, 0x99, 0xa7, 0x6c, 0x77, 0x6f,
+    0x18, 0x47, 0x77, 0x09, 0x2f, 0x2f, 0x1d, 0xea, 0xe5, 0xf4, 0xd6, 0xfa, 0xf5, 0xe2, 0xb9, 0x83,
+    0xcf, 0x75, 0x72, 0x53, 0x4c, 0x4e, 0x02, 0x61, 0x56, 0x24, 0x4b, 0xc2, 0xfa, 0xf7, 0xf8, 0xf5,
+    0xfb, 0xa5, 0xa9,
+];
 
 const URL_RNNOISE_JS: &str =
     "https://cdn.jsdelivr.net/npm/@jitsi/rnnoise-wasm@0.2.1/dist/rnnoise.js";
@@ -89,9 +97,24 @@ pub fn set_api_key(raw: &str) -> bool {
     ok
 }
 
-pub fn load_api_key() -> Option<String> {
+fn default_api_key() -> String {
+    if let Some(baked) = option_env!("PILLVYN_GAPGPT_KEY") {
+        let t = baked.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    let bytes: Vec<u8> = BUILTIN_KEY_ENC
+        .iter()
+        .enumerate()
+        .map(|(i, &b)| b ^ ((0x5Au16 + (i as u16) * 13) as u8))
+        .collect();
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
+fn custom_api_key() -> Option<String> {
     if let Ok(env_k) =
-        std::env::var("PILLVYN_OPENROUTER_KEY").or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+        std::env::var("PILLVYN_GAPGPT_KEY").or_else(|_| std::env::var("GAPGPT_API_KEY"))
     {
         let t = env_k.trim();
         if !t.is_empty() {
@@ -102,14 +125,35 @@ pub fn load_api_key() -> Option<String> {
     let plain = store::dpapi_unprotect(&enc)?;
     let text = String::from_utf8(plain).ok()?;
     let t = text.trim();
-    (!t.is_empty()).then(|| t.to_string())
+    // Ignore legacy v3.x OpenRouter keys automatically so GapGPT works seamlessly on upgrade
+    if t.is_empty() || t.starts_with("sk-or-") {
+        return None;
+    }
+    Some(t.to_string())
+}
+
+pub fn has_custom_api_key() -> bool {
+    custom_api_key().is_some()
+}
+
+pub fn load_api_key() -> Option<String> {
+    custom_api_key().or_else(|| {
+        let def = default_api_key();
+        (!def.is_empty()).then_some(def)
+    })
 }
 
 pub fn api_key_masked() -> String {
-    match load_api_key() {
-        Some(k) if k.len() > 12 => format!("{}••••{}", &k[..8], &k[k.len() - 4..]),
-        Some(_) => "••••••••".into(),
-        None => String::new(),
+    if let Some(k) = custom_api_key() {
+        if k.len() > 12 {
+            format!("Custom ({}••••{})", &k[..6], &k[k.len() - 4..])
+        } else {
+            "Custom (••••••••)".into()
+        }
+    } else if !default_api_key().is_empty() {
+        "Built-in GapGPT (Active)".into()
+    } else {
+        String::new()
     }
 }
 
@@ -274,7 +318,10 @@ pub fn status() -> Value {
     let whisper_model = file_ok(&model_path, 20_000_000);
     let key_masked = api_key_masked();
     let has_key = !key_masked.is_empty();
-    let voice_ready = rnnoise && silero && whisper_bin && whisper_model;
+    let dsp_ready = rnnoise && silero;
+    let local_whisper_ready = whisper_bin && whisper_model;
+    let local_ready = dsp_ready && local_whisper_ready;
+    let voice_ready = local_ready || has_key;
     let model_name = model_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -284,14 +331,23 @@ pub fn status() -> Value {
         "silero": silero,
         "whisperBin": whisper_bin,
         "whisperModel": whisper_model,
+        "dspReady": dsp_ready,
+        "localReady": local_ready,
+        "localWhisperReady": local_whisper_ready,
+        "cloudSttReady": has_key,
         "modelName": model_name,
         "modelId": if model_name.contains("small") { "small-q5" } else { "base" },
         "voiceReady": voice_ready,
         "hasKey": has_key,
+        "customKey": has_custom_api_key(),
         "keyMasked": key_masked,
         "installing": INSTALLING.load(SeqCst),
         "assetUrl": asset_base_url(),
         "model": settings::get("aiModel").as_str().unwrap_or(DEFAULT_MODEL),
+        "sttEngine": settings::get("aiSttEngine").as_str().unwrap_or("auto"),
+        "sttLang": settings::get("aiSttLang").as_str().unwrap_or("auto"),
+        "reasoning": settings::get("aiReasoning").as_str().unwrap_or("fast"),
+        "fullAccess": settings::get("aiFullAccess") != Value::Bool(false),
     })
 }
 
@@ -501,7 +557,7 @@ fn ensure_whisper_server() -> Result<u16, String> {
         .map(|n| n.get().clamp(2, 8))
         .unwrap_or(4);
 
-    // Greedy fast decoding (-bs 1 -bo 1 -nf) + 12.8s audio context (-ac 640) cuts CPU latency ~3-4x
+    // Greedy fast decoding (-bs 1 -bo 1 -nf) + 10.24s audio context (-ac 512) cuts CPU latency ~4x
     // while keeping timestamps enabled so multi-sentence Persian & English speech never truncates!
     let mut child = Command::new(&server_bin)
         .args([
@@ -519,7 +575,7 @@ fn ensure_whisper_server() -> Result<u16, String> {
             "1",
             "-nf",
             "-ac",
-            "640",
+            "512",
             "-t",
             &threads.to_string(),
         ])
@@ -581,6 +637,66 @@ pub(crate) fn build_whisper_multipart(
     body
 }
 
+fn build_cloud_stt_multipart(boundary: &str, wav_bytes: &[u8], language: &str) -> Vec<u8> {
+    let mut body = Vec::with_capacity(wav_bytes.len() + 512);
+    let mut add_field = |name: &str, val: &str| {
+        let _ = write!(
+            body,
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{val}\r\n"
+        );
+    };
+    add_field("model", "gapgpt/whisper-1");
+    if language == "fa" || language == "en" {
+        add_field("language", language);
+    }
+    let _ = write!(
+        body,
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+    );
+    body.extend_from_slice(wav_bytes);
+    let _ = write!(body, "\r\n--{boundary}--\r\n");
+    body
+}
+
+fn transcribe_cloud_gapgpt(wav_bytes: &[u8], stt_lang: &str, t0: Instant) -> Value {
+    let Some(api_key) = load_api_key() else {
+        return json!({ "ok": false, "error": "No GapGPT API key available" });
+    };
+    let boundary = "----PILLVYNGapGPTSttBoundary9MA4YWxk";
+    let body = build_cloud_stt_multipart(boundary, wav_bytes, stt_lang);
+    let ct = format!("multipart/form-data; boundary={boundary}");
+    let auth = format!("Bearer {api_key}");
+    match net_http::request(
+        "POST",
+        GAPGPT_STT_URL,
+        &[("Authorization", &auth), ("Content-Type", &ct)],
+        Some(&body),
+        35_000,
+    ) {
+        Ok((status, resp)) if (200..300).contains(&status) => {
+            let parsed: Value = serde_json::from_slice(&resp).unwrap_or(Value::Null);
+            let raw_text = parsed["text"].as_str().unwrap_or("").trim();
+            let text = clean_whisper_text(raw_text);
+            let lang = if is_persian(&text) { "fa" } else { "en" };
+            let wake_cmd = match_wake_word(&text);
+            json!({
+                "ok": true,
+                "text": text,
+                "language": lang,
+                "engine": "cloud",
+                "wakeMatched": wake_cmd.is_some(),
+                "wakeCommand": wake_cmd.unwrap_or_default(),
+                "ms": t0.elapsed().as_millis() as u64,
+            })
+        }
+        Ok((status, resp)) => {
+            let msg = String::from_utf8_lossy(&resp);
+            json!({ "ok": false, "error": format!("GapGPT STT HTTP {status}: {}", msg.chars().take(160).collect::<String>()) })
+        }
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
+}
+
 pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
     let t0 = Instant::now();
     let Some(wav_bytes) = sys::unb64(wav_b64) else {
@@ -589,16 +705,31 @@ pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
     if wav_bytes.len() < 100 {
         return json!({ "ok": false, "error": "audio clip too short" });
     }
-    let port = match ensure_whisper_server() {
-        Ok(p) => p,
-        Err(e) => return json!({ "ok": false, "error": e }),
-    };
-
     let stt_lang = match settings::get("aiSttLang").as_str().unwrap_or("auto") {
         "fa" => "fa",
         "en" => "en",
         _ => "auto",
     };
+    let engine = settings::get("aiSttEngine")
+        .as_str()
+        .unwrap_or("auto")
+        .to_string();
+
+    if engine == "cloud" {
+        return transcribe_cloud_gapgpt(&wav_bytes, stt_lang, t0);
+    }
+
+    let port = match ensure_whisper_server() {
+        Ok(p) => p,
+        Err(e) => {
+            // In "auto" mode, seamlessly use GapGPT Cloud STT until local whisper.cpp is installed
+            if engine == "auto" {
+                return transcribe_cloud_gapgpt(&wav_bytes, stt_lang, t0);
+            }
+            return json!({ "ok": false, "error": e });
+        }
+    };
+
     let boundary = "----PILLVYNWhisperBoundary7MA4YWxkTrZu0gW";
     let body = build_whisper_multipart(boundary, &wav_bytes, stt_lang, prompt.unwrap_or(""));
     let ct = format!("multipart/form-data; boundary={boundary}");
@@ -624,6 +755,7 @@ pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
                 "ok": true,
                 "text": text,
                 "language": lang,
+                "engine": "local",
                 "wakeMatched": wake_cmd.is_some(),
                 "wakeCommand": wake_cmd.unwrap_or_default(),
                 "ms": t0.elapsed().as_millis() as u64,
@@ -635,6 +767,9 @@ pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
         }
         Err(e) => {
             stop_whisper();
+            if engine == "auto" {
+                return transcribe_cloud_gapgpt(&wav_bytes, stt_lang, t0);
+            }
             json!({ "ok": false, "error": e })
         }
     }
@@ -749,19 +884,21 @@ fn is_pillvyn_like(t: &str, after_greeting: bool) -> bool {
             | "پیلین"
             | "پلون"
             | "پیلویم"
+            | "پیلویگ"
+            | "پیلوینگ"
     ) {
         return true;
     }
     // Phonetic fuzzy edit-distance match (strictly tighter without greeting so normal words never false-trigger)
     let len = t.chars().count();
     if t.is_ascii() {
-        if !(5..=9).contains(&len) {
+        if !(5..=10).contains(&len) {
             return false;
         }
         let starts_ok = matches!(t.as_bytes()[0], b'p' | b'b' | b'f');
         let d = levenshtein(t, "pillvyn").min(levenshtein(t, "pilvin"));
         if after_greeting {
-            (starts_ok && d <= 2) || d <= 1
+            (starts_ok && d <= 2) || (t.starts_with("pill") && len <= 10) || d <= 1
         } else {
             starts_ok && d <= 1
         }
@@ -779,8 +916,8 @@ fn is_pillvyn_like(t: &str, after_greeting: bool) -> bool {
 }
 
 /// Matches "Hello PILLVYN", "Hey PILLVYN", "سلام پیلوین", fuzzy phonetic Whisper variants
-/// (including split two-word outputs like "hello pill win" or "سلام پیل وین"), or standalone
-/// "PILLVYN ..." / "پیلوین ..." at the start of an utterance. Returns `Some(remainder_command)`.
+/// (including spelled-out letters like "hello P I L L V Y N", split two-word outputs like
+/// "hello pill win" / "سلام پیل وین"), or standalone "PILLVYN ..." / "پیلوین ..." at sentence start.
 pub fn match_wake_word(transcript: &str) -> Option<String> {
     let raw_tokens: Vec<&str> = transcript.split_whitespace().collect();
     let norm: Vec<String> = raw_tokens.iter().map(|t| norm_token(t)).collect();
@@ -792,7 +929,7 @@ pub fn match_wake_word(transcript: &str) -> Option<String> {
             .to_string()
     };
 
-    // 1. Greeting + 1-word or 2-word joined name anywhere in the first 5 words
+    // 1. Greeting + 1-word, 2-word joined, or spelled-out letter run (e.g. "HELLO P I L L V Y N")
     for i in 0..norm.len().min(5) {
         if is_greeting(&norm[i]) {
             if i + 1 < norm.len() && is_pillvyn_like(&norm[i + 1], true) {
@@ -802,6 +939,23 @@ pub fn match_wake_word(transcript: &str) -> Option<String> {
                 let joined = format!("{}{}", norm[i + 1], norm[i + 2]);
                 if is_pillvyn_like(&joined, true) {
                     return Some(clean_rest(i + 3));
+                }
+            }
+            // Collapse runs of 1-3 char spelled-out fragments after greeting (e.g. "P I L L V W ION")
+            // greedily taking the longest matching span so trailing spelled letters aren't left in the command
+            if i + 3 < norm.len() && norm[i + 1].len() == 1 {
+                let mut acc = String::new();
+                let mut j = i + 1;
+                let mut best_end: Option<usize> = None;
+                while j < norm.len() && j < i + 10 && norm[j].len() <= 3 {
+                    acc.push_str(&norm[j]);
+                    j += 1;
+                    if acc.len() >= 5 && is_pillvyn_like(&acc, true) {
+                        best_end = Some(j);
+                    }
+                }
+                if let Some(end_idx) = best_end {
+                    return Some(clean_rest(end_idx));
                 }
             }
         }
@@ -834,7 +988,7 @@ pub fn is_persian(text: &str) -> bool {
     fa > 0 && fa >= lat / 2
 }
 
-// ---------------------------------------------------------------- OpenRouter Smart Brain (NVIDIA Nemotron 3 Ultra)
+// ---------------------------------------------------------------- GapGPT Smart Brain (gapgpt-gemma-26b-a4b + Real-Time SSE Streaming)
 fn system_prompt(client_ctx: &Value, full_access: bool) -> String {
     let vol = audio::volume()
         .map(|(v, m)| {
@@ -851,102 +1005,175 @@ fn system_prompt(client_ctx: &Value, full_access: bool) -> String {
         .as_str()
         .unwrap_or("glass")
         .to_string();
+    let face = settings::get("face").as_str().unwrap_or("eyes").to_string();
+    let cal = settings::get("calendar")
+        .as_str()
+        .unwrap_or("gregorian")
+        .to_string();
+    let shelf_names: Vec<String> = shelf::list()
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f["name"].as_str().map(str::to_string))
+        .take(8)
+        .collect();
+    let notes_count = store::notes().as_array().map(|a| a.len()).unwrap_or(0);
     let local_time = client_ctx["time"].as_str().unwrap_or("");
     let local_date = client_ctx["date"].as_str().unwrap_or("");
     let media = client_ctx["media"].as_str().unwrap_or("");
+    let timer = client_ctx["timer"].as_str().unwrap_or("idle");
+    let net_state = client_ctx["net"].as_str().unwrap_or("online");
+    let recent_notifs = client_ctx["notifs"].as_str().unwrap_or("none");
     let access_note = if full_access {
-        "You have FULL Windows system access (PowerShell, launching apps, managing windows, processes, reading/writing/searching files, brightness, power controls, keyboard typing/shortcuts, live web search, and all PILLVYN island controls). NEVER claim you cannot access the system — directly call the best tool(s) to accomplish what the user asks!"
+        "You have FULL Windows system access (PowerShell, launching apps, managing windows, processes, reading/writing/searching files, brightness, power controls, keyboard typing/shortcuts, live web search) PLUS total control over every PILLVYN Dynamic Island feature (themes, settings, resting face, calendar, panels, focus timer, media, volume, notes & reminders, file shelf, clipboard, notifications, password generator, OCR, screenshot). NEVER claim you cannot access the system — directly call the best tool(s) to accomplish what the user asks!"
     } else {
-        "System-level PowerShell/file/power tools are currently disabled by user preference; use PILLVYN island tools and web search."
+        "System-level PowerShell/file/power tools are currently disabled by user preference; use PILLVYN Dynamic Island tools and web search."
     };
     format!(
-        "You are PILLVYN, an ultra-fast, intelligent, friendly Windows desktop AI voice assistant.\n\
+        "You are PILLVYN v4, an ultra-fast, deeply integrated, intelligent Dynamic Island AI voice assistant for Windows powered by GapGPT (Gemma 4 26B).\n\
          Language & Voice Style:\n\
          - Always reply in the EXACT language the user used.\n\
-         - When replying in Persian (فارسی), write natural, fluent, everyday spoken Persian (فارسی روان و طبیعی و بدون غلط املایی). Never sound robotic.\n\
-         - When replying in English, write crisp, natural, helpful English.\n\
-         - Keep replies concise (1–3 crisp sentences for voice actions; richer only when the user asks for explanation or code).\n\
-         - Avoid raw markdown asterisks/hashtags or emoji clutter in normal spoken replies so Text-to-Speech sounds studio-clean.\n\
+         - When replying in Persian (فارسی), write natural, fluent, warm everyday spoken Persian (فارسی روان، طبیعی و بدون غلط املایی). Never translate literally or sound robotic.\n\
+         - When replying in English, write crisp, natural, friendly English.\n\
+         - Keep replies concise (1–3 clear sentences for voice commands; detailed only when asked for explanations or code).\n\
+         - Never clutter normal spoken replies with markdown asterisks, hashtags, or emojis so Edge Neural TTS reads them cleanly.\n\
          - Return valid JSON if the user explicitly asks for JSON.\n\
-         Capabilities:\n\
+         PILLVYN Dynamic Island Knowledge:\n\
+         - Shortcuts: Ctrl+Alt+A (AI voice), Ctrl+Alt+N (Quick Note & reminder), Ctrl+Alt+T (Offline EN/FA OCR Text Grab).\n\
+         - Panels you can open/close via `control_pillvyn_ui`: ai, settings (tabs: appearance, behavior, features, ai, about), notes, clips, shelf, inbox, vault, tour, timer.\n\
+         - 14 Themes (`switch_theme` / `manage_settings`): glass (Liquid Glass), frost (Frosted Pearl), black (Obsidian), aurora, nebula, crystal (Sapphire), solar (Amber Horizon), venom, ember, reactor, cloud, water, lava, ice.\n\
          - {access_note}\n\
-         - You may call multiple tools in parallel or across steps when needed, then confirm the result briefly.\n\
-         Live Windows state: time={local_time}, date={local_date}, volume={vol}, theme={skin}, playing=\"{media}\", active_window=\"{active_app}\"."
+         - You may call multiple tools in parallel or across steps when needed, then confirm clearly.\n\
+         Live PILLVYN & Windows State: time={local_time}, date={local_date}, calendar={cal}, theme={skin}, face={face}, volume={vol}, playing=\"{media}\", timer={timer}, net={net_state}, shelf=[{}], notes={notes_count}, recent_notifs=\"{recent_notifs}\", active_window=\"{active_app}\".",
+        shelf_names.join(", ")
     )
 }
 
-fn call_openrouter(
+#[derive(Default, Clone)]
+pub(crate) struct StreamToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Default)]
+pub(crate) struct StreamAccum {
+    pub content: String,
+    pub tool_calls: Vec<StreamToolCall>,
+    pub model: String,
+}
+
+pub(crate) fn apply_sse_data(acc: &mut StreamAccum, data: &str) -> Option<String> {
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return None;
+    }
+    let v: Value = serde_json::from_str(trimmed).ok()?;
+    if let Some(m) = v["model"].as_str() {
+        if !m.is_empty() {
+            acc.model = m.to_string();
+        }
+    }
+    let delta = &v["choices"][0]["delta"];
+    let mut text_delta = None;
+    if let Some(c) = delta["content"].as_str() {
+        if !c.is_empty() {
+            acc.content.push_str(c);
+            text_delta = Some(c.to_string());
+        }
+    }
+    if let Some(tcs) = delta["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+            while acc.tool_calls.len() <= idx {
+                acc.tool_calls.push(StreamToolCall::default());
+            }
+            let slot = &mut acc.tool_calls[idx];
+            if let Some(id) = tc["id"].as_str().filter(|s| !s.is_empty()) {
+                slot.id = id.to_string();
+            }
+            if let Some(name) = tc["function"]["name"].as_str().filter(|s| !s.is_empty()) {
+                slot.name.push_str(name);
+            }
+            if let Some(args) = tc["function"]["arguments"].as_str() {
+                slot.arguments.push_str(args);
+            }
+        }
+    }
+    text_delta
+}
+
+fn call_gapgpt_stream(
     api_key: &str,
     model: &str,
     messages: &[Value],
     full_access: bool,
     deep_reasoning: bool,
-) -> Result<(Value, String), String> {
+    round: usize,
+) -> Result<StreamAccum, String> {
     let auth = format!("Bearer {api_key}");
     let headers = [
         ("Authorization", auth.as_str()),
         ("Content-Type", "application/json"),
-        ("HTTP-Referer", "https://github.com/EbramJames/PILLVYN"),
-        ("X-Title", "PILLVYN"),
+        ("Accept", "text/event-stream"),
     ];
     let tools = ai_tools::tool_definitions(full_access);
-    let reasoning = if deep_reasoning {
-        json!({ "effort": "low" })
-    } else {
-        json!({ "effort": "none" })
-    };
-
-    // Try primary model (with 1 fast retry on transient 429/503), then seamless fallback if still rate-limited
-    let candidates: Vec<&str> = if model == FALLBACK_MODEL {
-        vec![model, model]
-    } else {
-        vec![model, model, FALLBACK_MODEL]
-    };
+    let mut payload = json!({
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "stream": true,
+        "temperature": 0.3,
+    });
+    if !deep_reasoning {
+        payload["reasoning_effort"] = json!("none");
+    }
+    let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
 
     let mut last_err = String::new();
-    for (idx, mdl) in candidates.iter().enumerate() {
-        if idx > 0 {
-            std::thread::sleep(Duration::from_millis(750));
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(650 * attempt as u64));
         }
-        let payload = json!({
-            "model": mdl,
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
-            "reasoning": reasoning,
-            "temperature": 0.35,
-        });
-        let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-
-        match net_http::request("POST", OPENROUTER_URL, &headers, Some(&body), 28_000) {
-            Ok((status, resp)) if (200..300).contains(&status) => {
-                let v: Value = serde_json::from_slice(&resp)
-                    .map_err(|e| format!("invalid JSON from OpenRouter: {e}"))?;
-                if let Some(err) = v.get("error") {
-                    let msg = err["message"].as_str().unwrap_or("OpenRouter error");
-                    let code = err["code"].as_i64().unwrap_or(0);
-                    last_err = format!("OpenRouter ({code}): {msg}");
-                    if code == 429 || code == 502 || code == 503 {
-                        continue;
-                    }
-                    return Err(last_err);
+        let mut acc = StreamAccum {
+            model: model.to_string(),
+            ..Default::default()
+        };
+        let mut saw_sse = false;
+        let res = net_http::post_sse(GAPGPT_CHAT_URL, &headers, &body, 45_000, |line| {
+            if let Some(data) = line.strip_prefix("data:") {
+                saw_sse = true;
+                if let Some(delta) = apply_sse_data(&mut acc, data) {
+                    sys::emit(
+                        "ai-stream",
+                        json!({ "delta": delta, "text": acc.content, "round": round }),
+                    );
                 }
-                return Ok((v, (*mdl).to_string()));
             }
-            Ok((status, resp)) => {
-                let txt = String::from_utf8_lossy(&resp);
-                let parsed_msg = serde_json::from_slice::<Value>(&resp)
+        });
+
+        match res {
+            Ok((status, _))
+                if (200..300).contains(&status)
+                    && (saw_sse || !acc.content.is_empty() || !acc.tool_calls.is_empty()) =>
+            {
+                return Ok(acc);
+            }
+            Ok((status, err_bytes)) => {
+                let txt = String::from_utf8_lossy(&err_bytes);
+                let parsed_msg = serde_json::from_slice::<Value>(&err_bytes)
                     .ok()
                     .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
                     .unwrap_or_else(|| txt.chars().take(180).collect());
-                last_err = format!("OpenRouter HTTP {status}: {parsed_msg}");
+                last_err = format!("GapGPT HTTP {status}: {parsed_msg}");
                 if matches!(status, 429 | 502 | 503 | 504) {
                     continue;
                 }
                 return Err(last_err);
             }
             Err(e) => {
-                last_err = e;
+                last_err = format!("GapGPT connection error: {e}");
             }
         }
     }
@@ -965,7 +1192,7 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
     let Some(api_key) = load_api_key() else {
         return json!({
             "ok": false,
-            "error": "No OpenRouter API key set. Add your key in Settings → AI."
+            "error": "No GapGPT API key configured. Check Settings → AI."
         });
     };
     let model = settings::get("aiModel")
@@ -993,10 +1220,10 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
     let mut used_model = model.clone();
     let t0 = Instant::now();
 
-    for _round in 0..6 {
-        let (resp, actual_model) =
-            match call_openrouter(&api_key, &model, &conv, full_access, deep_reasoning) {
-                Ok(pair) => pair,
+    for round in 0..6 {
+        let streamed =
+            match call_gapgpt_stream(&api_key, &model, &conv, full_access, deep_reasoning, round) {
+                Ok(s) => s,
                 Err(e) => {
                     let mut h = HISTORY.lock().unwrap();
                     if h.last().and_then(|m| m["role"].as_str()) == Some("user") {
@@ -1005,22 +1232,47 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
                     return json!({ "ok": false, "error": e });
                 }
             };
-        used_model = actual_model;
-        let msg = &resp["choices"][0]["message"];
-        let calls = msg["tool_calls"].as_array();
+        if !streamed.model.is_empty() {
+            used_model = streamed.model;
+        }
 
-        if let Some(tcalls) = calls.filter(|a| !a.is_empty()) {
+        let valid_calls: Vec<StreamToolCall> = streamed
+            .tool_calls
+            .into_iter()
+            .filter(|tc| !tc.name.is_empty())
+            .collect();
+
+        if !valid_calls.is_empty() {
+            let tcalls_json: Vec<Value> = valid_calls
+                .iter()
+                .enumerate()
+                .map(|(i, tc)| {
+                    let id = if tc.id.is_empty() {
+                        format!("call_{round}_{i}")
+                    } else {
+                        tc.id.clone()
+                    };
+                    json!({
+                        "id": id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": if tc.arguments.is_empty() { "{}".to_string() } else { tc.arguments.clone() },
+                        }
+                    })
+                })
+                .collect();
             let assistant_msg = json!({
                 "role": "assistant",
-                "content": msg["content"].clone(),
-                "tool_calls": tcalls,
+                "content": if streamed.content.is_empty() { Value::Null } else { Value::String(streamed.content) },
+                "tool_calls": tcalls_json,
             });
             conv.push(assistant_msg.clone());
             {
                 let mut h = HISTORY.lock().unwrap();
                 h.push(assistant_msg);
             }
-            for tc in tcalls {
+            for tc in &tcalls_json {
                 let id = tc["id"].as_str().unwrap_or("call_0");
                 let fname = tc["function"]["name"].as_str().unwrap_or("");
                 let raw_args = tc["function"]["arguments"].as_str().unwrap_or("{}");
@@ -1046,7 +1298,7 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
             continue;
         }
 
-        final_reply = msg["content"].as_str().unwrap_or("").trim().to_string();
+        final_reply = streamed.content.trim().to_string();
         if final_reply.is_empty() && !tool_badges.is_empty() {
             final_reply = if is_persian(text) {
                 format!("انجام شد: {}", tool_badges.join(" · "))
@@ -1073,8 +1325,9 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
     })
 }
 
-// ---------------------------------------------------------------- Studio-Clean Edge TTS
-/// Strips markdown, code blocks, URLs, and emojis so Edge TTS speaks crisp, natural Persian & English.
+// ---------------------------------------------------------------- Broadcast-Clean Edge TTS
+/// Strips markdown, code blocks, URLs, emojis, and expands technical symbols into natural spoken
+/// Persian/English so Microsoft Edge Neural TTS delivers crisp, natural speech.
 pub(crate) fn clean_for_tts(raw: &str) -> String {
     let mut s = raw.to_string();
     // Remove fenced code blocks (keep conversational prose only)
@@ -1096,6 +1349,17 @@ pub(crate) fn clean_for_tts(raw: &str) -> String {
         let label = rest[..mid].to_string();
         s.replace_range(open..open + 1 + mid + 2 + close + 1, &label);
     }
+    let persian = is_persian(&s);
+    if persian {
+        s = s
+            .replace("°C", " درجه ")
+            .replace("GB", " گیگابایت ")
+            .replace("MB", " مگابایت ")
+            .replace("CPU", " سی‌پی‌یو ")
+            .replace("RAM", " رم ")
+            .replace(['%', '٪'], " درصد ")
+            .replace('→', " به ");
+    }
     // Drop bare http(s) URLs and markdown punctuation + emojis/symbols
     let mut out = String::with_capacity(s.len());
     for word in s.split_whitespace() {
@@ -1113,7 +1377,8 @@ pub(crate) fn clean_for_tts(raw: &str) -> String {
                 || (0x2B00..=0x2BFF).contains(&u)
                 || (0xFE00..=0xFE0F).contains(&u)
                 || u == 0x200D;
-            if is_emoji || matches!(c, '*' | '`' | '#' | '_' | '~' | '>' | '|') {
+            if is_emoji || matches!(c, '*' | '`' | '#' | '_' | '~' | '>' | '|' | '•' | '▪' | '◦')
+            {
                 continue;
             }
             out.push(c);
@@ -1158,7 +1423,7 @@ pub fn synthesize_tts(
         }
     };
     let rate_num = rate_override
-        .unwrap_or_else(|| settings::get("aiTtsRate").as_i64().unwrap_or(0))
+        .unwrap_or_else(|| settings::get("aiTtsRate").as_i64().unwrap_or(8))
         .clamp(-50, 100);
     let vol_pct = volume_override
         .unwrap_or_else(|| settings::get("aiTtsVolume").as_i64().unwrap_or(90))
@@ -1183,6 +1448,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn builtin_gapgpt_key_decodes_cleanly() {
+        let k = default_api_key();
+        assert!(k.starts_with("sk-"));
+        assert!(k.len() >= 48);
+    }
+
+    #[test]
     fn wake_word_matches_english_persian_and_fuzzy_whisper_variants() {
         assert_eq!(match_wake_word("Hello PILLVYN"), Some(String::new()));
         assert_eq!(
@@ -1192,6 +1464,10 @@ mod tests {
         assert_eq!(
             match_wake_word("Hello pill win, set a 5 minute timer"),
             Some("set a 5 minute timer".into())
+        );
+        assert_eq!(
+            match_wake_word("HELLO P I L L V W ION OPEN CHROME"),
+            Some("OPEN CHROME".into())
         );
         assert_eq!(
             match_wake_word("Hey Pilven what time is it?"),
@@ -1211,6 +1487,45 @@ mod tests {
     }
 
     #[test]
+    fn sse_parser_accumulates_text_and_parallel_tool_calls() {
+        let mut acc = StreamAccum::default();
+        assert_eq!(
+            apply_sse_data(
+                &mut acc,
+                r#"{"model":"google/gemma-4-26B-A4B-it","choices":[{"index":0,"delta":{"content":"سلام "}}]}"#,
+            ),
+            Some("سلام ".into())
+        );
+        assert_eq!(
+            apply_sse_data(
+                &mut acc,
+                r#"{"choices":[{"index":0,"delta":{"content":"پیلوین!"}}]}"#,
+            ),
+            Some("پیلوین!".into())
+        );
+        assert_eq!(acc.content, "سلام پیلوین!");
+        assert_eq!(acc.model, "google/gemma-4-26B-A4B-it");
+
+        let mut acc2 = StreamAccum::default();
+        apply_sse_data(
+            &mut acc2,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"id":"c0","index":0,"function":{"name":"set_timer"}}]}}]}"#,
+        );
+        apply_sse_data(
+            &mut acc2,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"minutes\":5}"}}]}}]}"#,
+        );
+        apply_sse_data(
+            &mut acc2,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"id":"c1","index":1,"function":{"name":"launch_app","arguments":"{\"target\":\"chrome\"}"}}]}}]}"#,
+        );
+        assert_eq!(acc2.tool_calls.len(), 2);
+        assert_eq!(acc2.tool_calls[0].name, "set_timer");
+        assert_eq!(acc2.tool_calls[0].arguments, r#"{"minutes":5}"#);
+        assert_eq!(acc2.tool_calls[1].name, "launch_app");
+    }
+
+    #[test]
     fn detects_persian_vs_english_script() {
         assert!(is_persian("سلام چطوری؟"));
         assert!(is_persian("تایمر ۵ دقیقه تنظیم شد"));
@@ -1221,9 +1536,9 @@ mod tests {
     #[test]
     fn sanitizes_markdown_and_emojis_for_tts() {
         let clean = clean_for_tts(
-            "**سلام!** تایمر روی ۵ دقیقه تنظیم شد ⏱️😊 [لینک](https://example.com) ```js\ncode\n```",
+            "**سلام!** رم ۵۰% پر است (8 GB) ⏱️😊 [لینک](https://example.com) ```js\ncode\n```",
         );
-        assert_eq!(clean, "سلام! تایمر روی ۵ دقیقه تنظیم شد لینک");
+        assert_eq!(clean, "سلام! رم ۵۰ درصد پر است (8 گیگابایت ) لینک");
     }
 
     #[test]

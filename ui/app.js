@@ -2269,10 +2269,15 @@ function buildAiEngineCard() {
   const stt = ai.status || {};
   const card = document.createElement('div'); card.className = 'row set ai-card'; card.style.setProperty('--i', 0);
   const top = document.createElement('div'); top.className = 'ai-card-top';
-  const title = document.createElement('b'); title.textContent = 'Local Voice Pipeline';
+  const title = document.createElement('b'); title.textContent = 'PILLVYN v4 Voice Pipeline';
   const badge = document.createElement('span');
-  badge.className = 'ai-state-pill' + (stt.voiceReady ? ' ok' : '');
-  badge.textContent = stt.voiceReady ? 'Ready' : stt.installing || (ai.install && !ai.install.done) ? 'Installing…' : 'Setup needed';
+  const fullLocal = !!(stt.localReady || (stt.rnnoise && stt.silero && stt.whisperBin && stt.whisperModel));
+  badge.className = 'ai-state-pill' + (fullLocal || stt.voiceReady ? ' ok' : '');
+  badge.textContent = stt.installing || (ai.install && !ai.install.done)
+    ? 'Installing…'
+    : fullLocal ? 'Local + Cloud Ready'
+    : stt.voiceReady ? 'Cloud Active'
+    : 'Setup needed';
   top.append(title, badge);
 
   const pills = document.createElement('div'); pills.className = 'ai-pills';
@@ -2320,8 +2325,8 @@ function buildAiEngineCard() {
   }
 
   const acts = document.createElement('div'); acts.className = 'ai-card-acts';
-  const dlBtn = document.createElement('button'); dlBtn.className = 'go' + (stt.voiceReady ? '' : ' solid');
-  dlBtn.textContent = stt.voiceReady ? 'Verify / Re-sync' : 'Download Voice Engine';
+  const dlBtn = document.createElement('button'); dlBtn.className = 'go' + (fullLocal ? '' : ' solid');
+  dlBtn.textContent = fullLocal ? 'Verify / Re-sync Local' : 'Download Local Engine';
   dlBtn.disabled = !!(stt.installing || (ai.install && !ai.install.done));
   dlBtn.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.install(st.settings.aiWhisperModel || 'small-q5'); });
   acts.appendChild(dlBtn);
@@ -2338,29 +2343,19 @@ function renderAi() {
   const ai = (window.pillvynAi && window.pillvynAi.state) || { status: {}, messages: [], mode: 'idle' };
   const stt = ai.status || {};
 
-  if (!stt.hasKey) {
-    const warn = document.createElement('div'); warn.className = 'row set sp ai-banner';
-    const l = document.createElement('span'); l.className = 'lbl';
-    l.innerHTML = '<b>OpenRouter API Key Needed</b><span class="dim">Stored encrypted with Windows DPAPI</span>';
-    const go = document.createElement('button'); go.className = 'go solid'; go.textContent = 'Set Key';
-    go.addEventListener('click', () => { st.settingsTab = 'ai'; st.holdUntil = Date.now() + 9000; setStack(true, 'settings'); });
-    warn.append(l, go);
-    stackList.appendChild(warn);
-  }
-
-  if (!stt.voiceReady || (ai.install && !ai.install.done)) {
+  if (ai.install && !ai.install.done) {
     stackList.appendChild(buildAiEngineCard());
   }
 
-  if (!ai.messages.length) {
+  if (!ai.messages.length && !ai.streamingText) {
     const intro = document.createElement('div'); intro.className = 'row set ai-welcome';
     const hdr = document.createElement('div'); hdr.className = 'ai-welcome-hdr';
-    hdr.innerHTML = `<b>Hello, I’m PILLVYN Ultra AI</b><span class="dim">Nemotron 3 Ultra · Full Windows Control · Auto FA/EN</span>`;
+    hdr.innerHTML = `<b>Hello, I’m PILLVYN v4 AI</b><span class="dim">GapGPT Gemma 4 26B · 32 Windows &amp; Island Tools · Auto FA/EN</span>`;
     const chips = document.createElement('div'); chips.className = 'ai-prompts';
     [
       'Check my RAM, CPU & battery',
-      'سلام پیلوین! نوت‌پد رو باز کن و تایمر ۵ دقیقه بذار',
-      'List files on my Desktop',
+      'سلام پیلوین! تایمر ۵ دقیقه بذار و تاریخ رو شمسی کن',
+      'Generate a strong password & open Notes',
       'Switch theme to Frosted Pearl',
     ].forEach((prompt) => {
       const bt = document.createElement('button'); bt.className = 'ai-prompt'; bt.dir = 'auto'; bt.textContent = prompt;
@@ -2387,7 +2382,9 @@ function renderAi() {
         spk.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.speak(m.text); });
         const cp = document.createElement('button'); cp.title = 'Copy reply'; cp.innerHTML = svg('copy') + '<span>Copy</span>';
         cp.addEventListener('click', () => { window.pillvyn.copy(m.text); flash('Copied reply'); });
-        bar.append(spk, cp);
+        const pin = document.createElement('button'); pin.title = 'Save to Quick Notes'; pin.innerHTML = svg('jot') + '<span>Pin</span>';
+        pin.addEventListener('click', () => { window.pillvyn.noteSave(null, m.text.slice(0, 600), 0); chime('tick'); flash('Saved to Notes'); });
+        bar.append(spk, cp, pin);
         if (m.latencyMs) {
           const lat = document.createElement('span'); lat.className = 'ai-lat dim';
           lat.textContent = (m.latencyMs / 1000).toFixed(1) + 's';
@@ -2399,13 +2396,19 @@ function renderAi() {
     });
   }
 
-  if (ai.mode === 'thinking' || ai.mode === 'transcribing') {
+  if (ai.mode === 'thinking' && ai.streamingText) {
+    const live = document.createElement('div'); live.className = 'row set ai-msg bot streaming';
+    const txt = document.createElement('div'); txt.id = 'ai-stream-txt'; txt.className = 'ai-msg-txt'; txt.dir = 'auto'; txt.textContent = ai.streamingText;
+    const caret = document.createElement('span'); caret.className = 'ai-caret';
+    live.append(txt, caret);
+    stackList.appendChild(live);
+  } else if (ai.mode === 'thinking' || ai.mode === 'transcribing') {
     const busy = document.createElement('div'); busy.className = 'row set ai-msg bot ai-busy';
     const statusTxt = ai.mode === 'transcribing'
-      ? 'Transcribing with whisper.cpp…'
+      ? 'Recognizing speech…'
       : ai.activeTool
         ? `Running ${ai.activeTool}…`
-        : 'Thinking with Nemotron 3 Ultra…';
+        : 'Thinking with GapGPT Gemma 4…';
     busy.innerHTML = `<span class="ai-dots"><i></i><i></i><i></i></span><span class="dim">${statusTxt}</span>`;
     stackList.appendChild(busy);
   }
@@ -2455,14 +2458,15 @@ const SETTINGS_SECTIONS = {
   ],
   ai: [
     ['aiEngineCard'],
-    ['sec', 'Wake Word & Nemotron 3 Ultra'],
+    ['sec', 'GapGPT Gemma 4 & Full Control'],
     ['toggle', 'aiWakeWord', 'Wake word (“Hello PILLVYN” / «سلام پیلوین»)'],
-    ['toggle', 'aiFullAccess', 'Full Windows system access (apps, files, PS)'],
+    ['toggle', 'aiFullAccess', 'Full Windows & Island access (32 tools)'],
     ['seg', 'aiReasoning', 'Response speed', [['fast', 'Fast'], ['deep', 'Deep']]],
+    ['seg', 'aiSttEngine', 'Voice recognition', [['auto', 'Auto'], ['local', 'Local'], ['cloud', 'Cloud']]],
     ['seg', 'aiSttLang', 'Speech language', [['auto', 'Auto'], ['fa', 'فارسی'], ['en', 'English']]],
-    ['seg', 'aiWhisperModel', 'Whisper STT model', [['small-q5', 'Small Q5 (190M)'], ['base', 'Base (148M)']]],
+    ['seg', 'aiWhisperModel', 'Local Whisper model', [['small-q5', 'Small Q5 (190M)'], ['base', 'Base (148M)']]],
     ['aiKeyRow'],
-    ['sec', 'Edge TTS (Persian & English)'],
+    ['sec', 'Edge Neural TTS (Persian & English)'],
     ['toggle', 'aiTtsAuto', 'Speak assistant replies aloud'],
     ['seg', 'aiTtsVoiceFa', 'Persian voice', [['fa-IR-DilaraNeural', 'Dilara'], ['fa-IR-FaridNeural', 'Farid']]],
     ['seg', 'aiTtsVoiceEn', 'English voice', [['en-US-AvaMultilingualNeural', 'Ava'], ['en-US-AndrewMultilingualNeural', 'Andrew'], ['en-US-EmmaMultilingualNeural', 'Emma'], ['en-US-BrianMultilingualNeural', 'Brian']]],
@@ -2531,13 +2535,15 @@ function renderSettings() {
     if (type === 'aiKeyRow') {
       const box = document.createElement('div'); box.className = 'row set ai-key-box'; box.style.setProperty('--i', Math.min(i, 6));
       const top = document.createElement('div'); top.className = 'ai-card-top';
-      const lbl = document.createElement('b'); lbl.textContent = 'OpenRouter API Key';
-      const mdl = document.createElement('span'); mdl.className = 'ai-model-tag'; mdl.textContent = s.aiModel || 'nvidia/nemotron-3-ultra-550b-a55b:free';
+      const lbl = document.createElement('b'); lbl.textContent = 'GapGPT API Key';
+      const mdl = document.createElement('span'); mdl.className = 'ai-model-tag'; mdl.textContent = s.aiModel || 'gapgpt-gemma-26b-a4b';
       top.append(lbl, mdl);
       const rowIn = document.createElement('div'); rowIn.className = 'ai-key-in';
       const inp = document.createElement('input');
       inp.id = 'ai-key-input'; inp.type = 'password'; inp.spellcheck = false; inp.autocomplete = 'off';
-      inp.placeholder = s.aiHasKey ? `Saved (${s.aiKeyMasked}) · paste new key` : 'sk-or-v1-… (encrypted via DPAPI)';
+      inp.placeholder = s.aiCustomKey
+        ? `${s.aiKeyMasked} · enter new key`
+        : `${s.aiKeyMasked || 'Built-in GapGPT (Active)'} · optional custom key`;
       inp.addEventListener('pointerdown', () => holdKeys(() => inp.focus()));
       inp.addEventListener('focus', () => holdKeys());
       const saveBtn = document.createElement('button'); saveBtn.className = 'go solid'; saveBtn.textContent = 'Save';
@@ -2549,7 +2555,7 @@ function renderSettings() {
         releaseKeys(false);
         if (ok) {
           chime('tick');
-          flash('API key encrypted & saved');
+          flash('Custom GapGPT key saved');
           if (window.pillvynAi) window.pillvynAi.refreshStatus();
         } else {
           flash('Could not save key');
@@ -2558,6 +2564,16 @@ function renderSettings() {
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
       saveBtn.addEventListener('click', doSave);
       rowIn.append(inp, saveBtn);
+      if (s.aiCustomKey) {
+        const rst = document.createElement('button'); rst.className = 'go'; rst.textContent = 'Reset';
+        rst.title = 'Restore built-in PILLVYN GapGPT key';
+        rst.addEventListener('click', async () => {
+          await window.pillvyn.aiSetKey('');
+          chime('tick'); flash('Built-in GapGPT key restored');
+          if (window.pillvynAi) window.pillvynAi.refreshStatus();
+        });
+        rowIn.appendChild(rst);
+      }
       box.append(top, rowIn);
       stackList.appendChild(box);
       return;
@@ -2568,9 +2584,9 @@ function renderSettings() {
       const meta = document.createElement('div'); meta.className = 'about-meta';
       const title = document.createElement('div'); title.className = 'about-title';
       const name = document.createElement('b'); name.textContent = s.appName || 'PILLVYN';
-      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.4.0');
+      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '4.0.0');
       title.append(name, ver);
-      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island + Ultra Voice AI';
+      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island + GapGPT Gemma 4 AI';
       meta.append(title, sub);
       card.append(ic, meta);
       stackList.appendChild(card);
@@ -2670,7 +2686,7 @@ function renderSettings() {
         if (key === 'tour') setStack(true, 'tour');
         else if (key === 'aiTestTts' && window.pillvynAi) {
           bt.textContent = 'Speaking…';
-          window.pillvynAi.speak('سلام! من پیلوین هستم، دستیار هوشمند شما. Hello! PILLVYN Ultra Voice AI is ready.').then(() => { bt.textContent = a; });
+          window.pillvynAi.speak('سلام! من پیلوین نسخه ۴ هستم، دستیار هوشمند شما. Hello! PILLVYN v4 Voice AI is ready.').then(() => { bt.textContent = a; });
         } else window.pillvyn.action(key);
       });
       row.appendChild(bt);
@@ -2696,7 +2712,7 @@ function renderSettings() {
 }
 // What PILLVYN can do: one row per feature, under the pill. A click on a row tries the thing itself.
 const TOUR = [
-  ['ai', 'PILLVYN Ultra Voice AI', 'Say “Hello PILLVYN” · Nemotron 3 Ultra · Full Windows control + FA/EN voice', 'ai', 'Ctrl Alt A'],
+  ['ai', 'PILLVYN v4 Voice AI', 'Say “Hello PILLVYN” · GapGPT Gemma 4 26B · 32 Windows & Island tools', 'ai', 'Ctrl Alt A'],
   ['note', 'Now playing', 'Play something: cover, title and controls appear here'],
   ['bell', 'Notifications', 'One line on the pill. Click it to open that chat', 'inbox'],
   ['link', 'Smart copy', 'Copy a link, a sum or a date, then click the line'],
@@ -2932,5 +2948,7 @@ function refreshAiView() {
   }
 }
 syncSurfaceClasses(); paintVol(); tick(); updateBadge(); paintStatus(); render();
-window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, chime, showTip, hideTip, extractCoverAccent, setArt, refreshAiView, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
+const recentNotifs = () => st.history.slice(0, 3).map((n) => `${n.app || ''}: ${n.title || n.body || ''}`.trim()).filter(Boolean).join(' | ') || 'none';
+const clearNotifs = () => { st.history = []; st.unseen = 0; updateBadge(); if (st.stackOpen && st.stackKind === 'notifs') renderStack(); };
+window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, chime, showTip, hideTip, extractCoverAccent, setArt, refreshAiView, recentNotifs, clearNotifs, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
 })();

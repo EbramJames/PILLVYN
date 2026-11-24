@@ -83,7 +83,7 @@ pub fn request(
     let parsed = parse_url(url)?;
     unsafe {
         let session = WinHandle::new(WinHttpOpen(
-            &HSTRING::from("PILLVYN/3.3.0"),
+            &HSTRING::from("PILLVYN/4.0.0"),
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             PCWSTR::null(),
             PCWSTR::null(),
@@ -166,6 +166,130 @@ pub fn request(
     }
 }
 
+/// Streaming HTTPS/HTTP POST for Server-Sent Events (OpenAI / GapGPT `stream: true`).
+/// Calls `on_line` for each complete UTF-8 line as chunks arrive on 2xx responses;
+/// returns `(status, err_body)` so callers can cleanly inspect non-2xx error payloads.
+pub fn post_sse(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+    timeout_ms: u32,
+    mut on_line: impl FnMut(&str),
+) -> Result<(u16, Vec<u8>), String> {
+    let parsed = parse_url(url)?;
+    unsafe {
+        let session = WinHandle::new(WinHttpOpen(
+            &HSTRING::from("PILLVYN/4.0.0"),
+            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            0,
+        ))
+        .ok_or_else(|| "WinHttpOpen failed".to_string())?;
+
+        let t = timeout_ms.min(i32::MAX as u32) as i32;
+        let _ = WinHttpSetTimeouts(session.0, t.min(15_000), t.min(15_000), t, t);
+
+        let conn = WinHandle::new(WinHttpConnect(
+            session.0,
+            &HSTRING::from(parsed.host.as_str()),
+            parsed.port,
+            0,
+        ))
+        .ok_or_else(|| format!("WinHttpConnect failed for {}", parsed.host))?;
+
+        let flags = if parsed.https {
+            WINHTTP_FLAG_SECURE
+        } else {
+            WINHTTP_OPEN_REQUEST_FLAGS(0)
+        };
+        let req = WinHandle::new(WinHttpOpenRequest(
+            conn.0,
+            &HSTRING::from("POST"),
+            &HSTRING::from(parsed.path.as_str()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            std::ptr::null(),
+            flags,
+        ))
+        .ok_or_else(|| "WinHttpOpenRequest failed".to_string())?;
+
+        for (k, v) in headers {
+            let line = format!("{k}: {v}\r\n");
+            let w = wide_no_nul(&line);
+            let _ = WinHttpAddRequestHeaders(req.0, &w, WINHTTP_ADDREQ_FLAG_ADD);
+        }
+
+        let (ptr, len) = if !body.is_empty() {
+            (Some(body.as_ptr() as *const c_void), body.len() as u32)
+        } else {
+            (None, 0u32)
+        };
+        WinHttpSendRequest(req.0, None, ptr, len, len, 0)
+            .map_err(|e| format!("WinHttpSendRequest failed: {e}"))?;
+        WinHttpReceiveResponse(req.0, std::ptr::null_mut())
+            .map_err(|e| format!("WinHttpReceiveResponse failed: {e}"))?;
+
+        let mut status: u32 = 0;
+        let mut status_len = std::mem::size_of::<u32>() as u32;
+        let _ = WinHttpQueryHeaders(
+            req.0,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            PCWSTR::null(),
+            Some((&mut status as *mut u32) as *mut c_void),
+            &mut status_len,
+            std::ptr::null_mut(),
+        );
+        let code = status as u16;
+        let ok = (200..300).contains(&code);
+
+        let mut err_buf = Vec::new();
+        let mut line_buf = Vec::<u8>::with_capacity(4096);
+        let mut buf = [0u8; 4096];
+        loop {
+            let mut avail = 0u32;
+            WinHttpQueryDataAvailable(req.0, &mut avail)
+                .map_err(|e| format!("WinHttpQueryDataAvailable failed: {e}"))?;
+            if avail == 0 {
+                break;
+            }
+            let to_read = (avail as usize).min(buf.len()) as u32;
+            let mut read = 0u32;
+            WinHttpReadData(req.0, buf.as_mut_ptr() as *mut c_void, to_read, &mut read)
+                .map_err(|e| format!("WinHttpReadData failed: {e}"))?;
+            if read == 0 {
+                break;
+            }
+            let slice = &buf[..read as usize];
+            if !ok {
+                err_buf.extend_from_slice(slice);
+                continue;
+            }
+            line_buf.extend_from_slice(slice);
+            while let Some(nl) = line_buf.iter().position(|&b| b == b'\n') {
+                let mut raw: Vec<u8> = line_buf.drain(..=nl).collect();
+                while matches!(raw.last(), Some(b'\n' | b'\r')) {
+                    raw.pop();
+                }
+                if let Ok(line) = std::str::from_utf8(&raw) {
+                    on_line(line);
+                }
+            }
+        }
+        if ok && !line_buf.is_empty() {
+            while matches!(line_buf.last(), Some(b'\n' | b'\r')) {
+                line_buf.pop();
+            }
+            if let Ok(line) = std::str::from_utf8(&line_buf) {
+                if !line.is_empty() {
+                    on_line(line);
+                }
+            }
+        }
+        Ok((code, err_buf))
+    }
+}
+
 pub fn download_file(
     url: &str,
     dest: &Path,
@@ -177,7 +301,7 @@ pub fn download_file(
     let parsed = parse_url(url)?;
     unsafe {
         let session = WinHandle::new(WinHttpOpen(
-            &HSTRING::from("PILLVYN/3.3.0"),
+            &HSTRING::from("PILLVYN/4.0.0"),
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             PCWSTR::null(),
             PCWSTR::null(),
