@@ -2280,7 +2280,7 @@ function buildAiEngineCard() {
     ['RNNoise', stt.rnnoise],
     ['Silero VAD', stt.silero],
     ['whisper.cpp', stt.whisperBin],
-    [stt.modelId === 'small-q5' ? 'Small-Q5' : 'Base FA+EN', stt.whisperModel],
+    [stt.modelId === 'small-q5' ? 'Small-Q5 FA+EN' : 'Base FA+EN', stt.whisperModel],
   ].forEach(([name, ok]) => {
     const sp = document.createElement('span');
     sp.className = 'ai-chip' + (ok ? ' ok' : '');
@@ -2288,6 +2288,25 @@ function buildAiEngineCard() {
     pills.appendChild(sp);
   });
   card.append(top, pills);
+
+  if (stt.voiceReady) {
+    const meters = document.createElement('div'); meters.className = 'ai-meters';
+    const mTop = document.createElement('div'); mTop.className = 'ai-meter-top';
+    const mLbl = document.createElement('span'); mLbl.textContent = 'Live Mic & Silero VAD';
+    const mSt = document.createElement('span'); mSt.id = 'ai-meter-state'; mSt.className = 'dim';
+    mSt.textContent = ai.micActive ? (ai.mode === 'standby' ? `Wake ready (${(ai.agcGain || 1).toFixed(1)}×)` : 'Listening') : 'Mic idle';
+    mTop.append(mLbl, mSt);
+    const bars = document.createElement('div'); bars.className = 'ai-meter-bars';
+    const b1 = document.createElement('div'); b1.className = 'ai-meter-track'; b1.title = 'Mic level (after AGC + RNNoise)';
+    const f1 = document.createElement('i'); f1.id = 'ai-mic-meter-fill'; f1.style.width = Math.round(clamp((ai.energy || 0) * 100, 0, 100)) + '%';
+    b1.appendChild(f1);
+    const b2 = document.createElement('div'); b2.className = 'ai-meter-track vad'; b2.title = 'Silero VAD speech probability';
+    const f2 = document.createElement('i'); f2.id = 'ai-vad-meter-fill'; f2.style.width = Math.round(clamp((ai.vadProb || 0) * 100, 0, 100)) + '%';
+    b2.appendChild(f2);
+    bars.append(b1, b2);
+    meters.append(mTop, bars);
+    card.appendChild(meters);
+  }
 
   if (ai.install && (!ai.install.done || ai.install.error)) {
     const pwrap = document.createElement('div'); pwrap.className = 'ai-prog-wrap';
@@ -2304,7 +2323,7 @@ function buildAiEngineCard() {
   const dlBtn = document.createElement('button'); dlBtn.className = 'go' + (stt.voiceReady ? '' : ' solid');
   dlBtn.textContent = stt.voiceReady ? 'Verify / Re-sync' : 'Download Voice Engine';
   dlBtn.disabled = !!(stt.installing || (ai.install && !ai.install.done));
-  dlBtn.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.install(st.settings.aiWhisperModel || 'base'); });
+  dlBtn.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.install(st.settings.aiWhisperModel || 'small-q5'); });
   acts.appendChild(dlBtn);
   if (ai.dspError || ai.micError) {
     const err = document.createElement('span'); err.className = 'dim ai-err-inline'; err.textContent = ai.dspError || ai.micError;
@@ -2336,13 +2355,13 @@ function renderAi() {
   if (!ai.messages.length) {
     const intro = document.createElement('div'); intro.className = 'row set ai-welcome';
     const hdr = document.createElement('div'); hdr.className = 'ai-welcome-hdr';
-    hdr.innerHTML = `<b>Hello, I’m PILLVYN AI</b><span class="dim">Ling 3.2 Flash · Auto FA/EN · Say “Hello PILLVYN” or try:</span>`;
+    hdr.innerHTML = `<b>Hello, I’m PILLVYN Ultra AI</b><span class="dim">Nemotron 3 Ultra · Full Windows Control · Auto FA/EN</span>`;
     const chips = document.createElement('div'); chips.className = 'ai-prompts';
     [
-      'Set a 5 minute timer',
-      'سلام پیلوین! تایمر ۱۰ دقیقه بذار',
+      'Check my RAM, CPU & battery',
+      'سلام پیلوین! نوت‌پد رو باز کن و تایمر ۵ دقیقه بذار',
+      'List files on my Desktop',
       'Switch theme to Frosted Pearl',
-      'What can you do?',
     ].forEach((prompt) => {
       const bt = document.createElement('button'); bt.className = 'ai-prompt'; bt.dir = 'auto'; bt.textContent = prompt;
       bt.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.sendText(prompt); });
@@ -2369,6 +2388,11 @@ function renderAi() {
         const cp = document.createElement('button'); cp.title = 'Copy reply'; cp.innerHTML = svg('copy') + '<span>Copy</span>';
         cp.addEventListener('click', () => { window.pillvyn.copy(m.text); flash('Copied reply'); });
         bar.append(spk, cp);
+        if (m.latencyMs) {
+          const lat = document.createElement('span'); lat.className = 'ai-lat dim';
+          lat.textContent = (m.latencyMs / 1000).toFixed(1) + 's';
+          bar.appendChild(lat);
+        }
         row.appendChild(bar);
       }
       stackList.appendChild(row);
@@ -2377,7 +2401,12 @@ function renderAi() {
 
   if (ai.mode === 'thinking' || ai.mode === 'transcribing') {
     const busy = document.createElement('div'); busy.className = 'row set ai-msg bot ai-busy';
-    busy.innerHTML = `<span class="ai-dots"><i></i><i></i><i></i></span><span class="dim">${ai.mode === 'transcribing' ? 'Transcribing with whisper.cpp…' : 'Thinking with Ling 3.2 Flash…'}</span>`;
+    const statusTxt = ai.mode === 'transcribing'
+      ? 'Transcribing with whisper.cpp…'
+      : ai.activeTool
+        ? `Running ${ai.activeTool}…`
+        : 'Thinking with Nemotron 3 Ultra…';
+    busy.innerHTML = `<span class="ai-dots"><i></i><i></i><i></i></span><span class="dim">${statusTxt}</span>`;
     stackList.appendChild(busy);
   }
   stackList.scrollTop = stackList.scrollHeight;
@@ -2426,17 +2455,20 @@ const SETTINGS_SECTIONS = {
   ],
   ai: [
     ['aiEngineCard'],
-    ['sec', 'Wake Word & OpenRouter Brain'],
+    ['sec', 'Wake Word & Nemotron 3 Ultra'],
     ['toggle', 'aiWakeWord', 'Wake word (“Hello PILLVYN” / «سلام پیلوین»)'],
-    ['seg', 'aiWhisperModel', 'Whisper STT model', [['base', 'Base (148M)'], ['small-q5', 'Small Q5 (190M)']]],
+    ['toggle', 'aiFullAccess', 'Full Windows system access (apps, files, PS)'],
+    ['seg', 'aiReasoning', 'Response speed', [['fast', 'Fast'], ['deep', 'Deep']]],
+    ['seg', 'aiSttLang', 'Speech language', [['auto', 'Auto'], ['fa', 'فارسی'], ['en', 'English']]],
+    ['seg', 'aiWhisperModel', 'Whisper STT model', [['small-q5', 'Small Q5 (190M)'], ['base', 'Base (148M)']]],
     ['aiKeyRow'],
     ['sec', 'Edge TTS (Persian & English)'],
     ['toggle', 'aiTtsAuto', 'Speak assistant replies aloud'],
     ['seg', 'aiTtsVoiceFa', 'Persian voice', [['fa-IR-DilaraNeural', 'Dilara'], ['fa-IR-FaridNeural', 'Farid']]],
-    ['seg', 'aiTtsVoiceEn', 'English voice', [['en-US-AvaNeural', 'Ava'], ['en-US-AndrewNeural', 'Andrew'], ['en-US-EmmaNeural', 'Emma'], ['en-US-BrianNeural', 'Brian']]],
+    ['seg', 'aiTtsVoiceEn', 'English voice', [['en-US-AvaMultilingualNeural', 'Ava'], ['en-US-AndrewMultilingualNeural', 'Andrew'], ['en-US-EmmaMultilingualNeural', 'Emma'], ['en-US-BrianMultilingualNeural', 'Brian']]],
     ['step', 'aiTtsRate', 'Speech speed', -50, 100, '%', 10],
     ['step', 'aiTtsVolume', 'Speech volume', 0, 100, '%', 10],
-    ['button', 'aiTestTts', 'Test Edge TTS voice', 'Speak'],
+    ['button', 'aiTestTts', 'Test Edge TTS (FA + EN)', 'Speak'],
   ],
   about: [
     ['aboutCard'],
@@ -2500,7 +2532,7 @@ function renderSettings() {
       const box = document.createElement('div'); box.className = 'row set ai-key-box'; box.style.setProperty('--i', Math.min(i, 6));
       const top = document.createElement('div'); top.className = 'ai-card-top';
       const lbl = document.createElement('b'); lbl.textContent = 'OpenRouter API Key';
-      const mdl = document.createElement('span'); mdl.className = 'ai-model-tag'; mdl.textContent = s.aiModel || 'inclusionai/ling-3.2-flash:free';
+      const mdl = document.createElement('span'); mdl.className = 'ai-model-tag'; mdl.textContent = s.aiModel || 'nvidia/nemotron-3-ultra-550b-a55b:free';
       top.append(lbl, mdl);
       const rowIn = document.createElement('div'); rowIn.className = 'ai-key-in';
       const inp = document.createElement('input');
@@ -2536,9 +2568,9 @@ function renderSettings() {
       const meta = document.createElement('div'); meta.className = 'about-meta';
       const title = document.createElement('div'); title.className = 'about-title';
       const name = document.createElement('b'); name.textContent = s.appName || 'PILLVYN';
-      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.3.0');
+      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.4.0');
       title.append(name, ver);
-      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island + Voice AI · Studio Edition';
+      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island + Ultra Voice AI';
       meta.append(title, sub);
       card.append(ic, meta);
       stackList.appendChild(card);
@@ -2638,7 +2670,7 @@ function renderSettings() {
         if (key === 'tour') setStack(true, 'tour');
         else if (key === 'aiTestTts' && window.pillvynAi) {
           bt.textContent = 'Speaking…';
-          window.pillvynAi.speak('سلام! من پیلوین هستم. Hello, PILLVYN voice is ready.').then(() => { bt.textContent = a; });
+          window.pillvynAi.speak('سلام! من پیلوین هستم، دستیار هوشمند شما. Hello! PILLVYN Ultra Voice AI is ready.').then(() => { bt.textContent = a; });
         } else window.pillvyn.action(key);
       });
       row.appendChild(bt);
@@ -2664,7 +2696,7 @@ function renderSettings() {
 }
 // What PILLVYN can do: one row per feature, under the pill. A click on a row tries the thing itself.
 const TOUR = [
-  ['ai', 'PILLVYN AI Voice Assistant', 'Say “Hello PILLVYN” or ask in Persian & English with tools + Edge TTS', 'ai', 'Ctrl Alt A'],
+  ['ai', 'PILLVYN Ultra Voice AI', 'Say “Hello PILLVYN” · Nemotron 3 Ultra · Full Windows control + FA/EN voice', 'ai', 'Ctrl Alt A'],
   ['note', 'Now playing', 'Play something: cover, title and controls appear here'],
   ['bell', 'Notifications', 'One line on the pill. Click it to open that chat', 'inbox'],
   ['link', 'Smart copy', 'Copy a link, a sum or a date, then click the line'],

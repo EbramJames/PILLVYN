@@ -32,6 +32,8 @@ Section "Install"
   Pop $0
   nsExec::Exec 'taskkill /F /IM "pillvyn.exe"'
   Pop $0
+  nsExec::Exec 'taskkill /F /IM "whisper-server.exe"'
+  Pop $0
   nsExec::Exec 'taskkill /F /IM "Peeky.exe"'
   Pop $0
   nsExec::Exec 'taskkill /F /IM "Qazi Island.exe"'
@@ -83,7 +85,9 @@ Section "Uninstall"
   Pop $0
   nsExec::Exec 'taskkill /F /IM "pillvyn.exe"'
   Pop $0
-  Sleep 600
+  nsExec::Exec 'taskkill /F /IM "whisper-server.exe"'
+  Pop $0
+  Sleep 800
   Delete "$SMPROGRAMS\${NAME}.lnk"
   DeleteRegValue HKCU "${RUN}" "${NAME}"
   DeleteRegKey HKCU "${UNKEY}"

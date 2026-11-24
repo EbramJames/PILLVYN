@@ -838,7 +838,7 @@ body.frost #island .ib.ai-btn.ai-live { color: #059669; }
   font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px;
   background: rgba(52, 211, 153, .16); color: #6ee7b7; box-shadow: inset 0 0 0 1px rgba(52, 211, 153, .28);
 }
-.ai-msg-acts { display: flex; gap: 6px; margin-top: 1px; }
+.ai-msg-acts { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
 .ai-msg-acts button {
   height: 22px; padding: 0 8px; border-radius: 11px; font-size: 10.5px; color: var(--dim);
   background: rgba(255, 255, 255, .07); display: inline-flex; align-items: center; gap: 4px;
@@ -846,6 +846,22 @@ body.frost #island .ib.ai-btn.ai-live { color: #059669; }
 }
 .ai-msg-acts button svg { width: 11px; height: 11px; }
 .ai-msg-acts button:hover { background: rgba(255, 255, 255, .18); color: #fff; }
+.ai-lat { margin-left: auto; font-size: 10px; font-variant-numeric: tabular-nums; opacity: .75; }
+
+/* Live Mic & Silero VAD sensitivity meters in Settings -> AI */
+.ai-meters { display: flex; flex-direction: column; gap: 5px; padding-top: 2px; }
+.ai-meter-top { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: rgba(255, 255, 255, .82); }
+.ai-meter-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ai-meter-track {
+  height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .1); overflow: hidden;
+}
+.ai-meter-track i {
+  display: block; height: 100%; width: 0%; border-radius: 99px;
+  background: linear-gradient(90deg, #38bdf8, #a78bfa);
+  transition: width 65ms linear;
+}
+.ai-meter-track.vad i { background: linear-gradient(90deg, #34d399, #10b981); }
+.ai-meter-track.vad i.hot { background: linear-gradient(90deg, #f472b6, #a855f7); }
 .row.set.ai-busy { flex-direction: row; align-items: center; gap: 9px; }
 .ai-dots { display: inline-flex; gap: 4px; }
 .ai-dots i { width: 6px; height: 6px; border-radius: 50%; background: #a78bfa; animation: aiDot 1.1s ease-in-out infinite; }
@@ -873,6 +889,8 @@ body.frost .ai-tool-chip { background: rgba(5, 150, 105, .12); color: #065f46; }
 body.frost .ai-msg-acts button { background: rgba(15, 23, 42, .07); color: #475569; }
 body.frost .ai-msg-acts button:hover { background: #18222f; color: #fff; }
 body.frost .ai-prog { background: rgba(15, 23, 42, .12); }
+body.frost .ai-meter-top { color: #334155; }
+body.frost .ai-meter-track { background: rgba(15, 23, 42, .11); }
 body.frost #stack-head #ai-head-send { background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; }
 body.frost #stack-head #ai-head-mic.live { background: linear-gradient(135deg, #059669, #0891b2); color: #fff; }
 #stack-head { padding: 6px 20px 5px; }

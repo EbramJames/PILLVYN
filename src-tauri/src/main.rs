@@ -3,6 +3,7 @@
 
 mod ai;
 mod ai_mic;
+mod ai_tools;
 mod audio;
 mod clip;
 mod hit;
@@ -529,6 +530,7 @@ fn main() {
             poll::start();
             audio::start_viz();
             ai::start_asset_server();
+            ai::prewarm_whisper();
             ai_mic::start();
             shelf::start_downloads();
             notif::scan_shortcuts();

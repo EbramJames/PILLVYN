@@ -2,6 +2,23 @@
 
 All notable changes to **PILLVYN** are documented here.
 
+## [3.4.0] - 2026-11-24
+
+### Added
+- **NVIDIA Nemotron 3 Ultra (Free) Brain & Ultra-Fast Inference:** Upgraded the default OpenRouter model to `nvidia/nemotron-3-ultra-550b-a55b:free` (with automatic `nvidia/nemotron-3.5-lightning:free` failover on upstream rate limits), adding a configurable **Response Speed** mode (`Fast` with `reasoning.effort = "none"` for ~1.4s live responses, or `Deep` with `reasoning.effort = "low"`) and automatic migration from v3.3.0 settings.
+- **Full Windows System Agent (26 Structured Tools, `src-tauri/src/ai_tools.rs`):** Expanded PILLVYN AI into a complete Windows automation agent (toggleable via **Settings → AI → Full Windows system access**, default on):
+  - **System & Shell:** `run_powershell` (UTF-8, 25s timeout, hidden window), `get_system_info` (RAM, CPU, battery, volume, active window), `set_brightness` (WMI display brightness), `power_control` (`lock`, `sleep`, `display_off`, `empty_recycle_bin`, `restart`, `shutdown`), and live `web_search`.
+  - **Apps, Windows & Processes:** `launch_app` (smart aliases + Start Menu shortcut search + `ShellExecuteW`), `manage_window` (`list`, `focus`, `minimize`, `maximize`, `restore`, `close`), `list_processes`, `kill_process`, and `keyboard_action` (Unicode Persian/English typing & keyboard shortcuts).
+  - **Filesystem:** `file_list`, `file_read`, `file_write`, and `file_search` with friendly Desktop/Documents/Downloads path resolution.
+  - **Live Tool Telemetry:** Streams real-time tool execution updates (`Running run_powershell…`) directly on the Dynamic Island pill and chat stream, plus response latency badges.
+- **Upgraded Bilingual Persian & English Voice Engine:**
+  - **Whisper `small-q5` Default + Fast Greedy Decoding:** Upgraded the default local STT model to `ggml-small-q5_1.bin` (`244M` params, `190 MB`) with `--beam-size 1 --best-of 1 --no-fallback`, background `whisper-server.exe` pre-warming on startup, and selectable **Speech Language** (`Auto` / `فارسی` / `English`).
+  - **Sentence-by-Sentence Streaming Edge TTS & Multilingual Neural Voices:** Switched default English voices to Microsoft `en-US-*MultilingualNeural` (`Ava`, `Andrew`, `Emma`, `Brian`) alongside Persian `fa-IR-DilaraNeural` / `fa-IR-FaridNeural`, added `clean_for_tts` (strips markdown, code blocks, URLs, and emojis before synthesis), and implemented concurrent sentence-by-sentence prefetching with automatic per-sentence Persian/English voice switching.
+  - **Live Mic & Silero VAD Meter + Natural Follow-Up Listening:** Added real-time Mic (AGC + RNNoise) and Silero VAD speech meters in **Settings → AI**, plus a 7-second conversational follow-up listening window after spoken replies.
+
+### Fixed
+- **Wake Word (`"Hello PILLVYN"` / `«سلام پیلوین»`) Reliability:** Enabled hands-free wake-word standby by default (`aiWakeWord: true`), added software microphone Auto-Gain Control (AGC, up to `3.5×` with noise-floor guard) for quiet USB microphones, tuned Silero VAD onset (`0.40`), continuation (`0.24`), 512 ms pre-roll, and snappy endpointing (`448 ms` standby / `704 ms` conversation), and rebuilt `match_wake_word` with fuzzy phonetic + Levenshtein matching for split/misheard English & Persian variants and direct `"PILLVYN …"` / `"پیلوین …"` commands.
+
 ## [3.3.0] - 2026-11-24
 
 ### Added

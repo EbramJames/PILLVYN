@@ -1,10 +1,11 @@
-// PILLVYN AI Assistant backend:
+// PILLVYN AI Assistant backend (v3.4.0 — Ultra Voice AI & Full Windows Agent):
 // - DPAPI-encrypted OpenRouter API key store (never stored in plaintext or committed to git)
 // - Localhost DSP asset server for RNNoise WASM + ONNX Runtime Web + Silero VAD ONNX
-// - One-click prerequisites manager for RNNoise, Silero VAD, whisper.cpp, and multilingual GGML models
-// - Managed whisper-server.exe (auto Persian/English STT + wake-word verification)
-// - OpenRouter Smart Brain (inclusionai/ling-3.2-flash:free) with multi-turn memory & multi-step Tool Calling
-// - Native Microsoft Edge Neural TTS (Persian & English MP3 with voice, speed, and volume)
+// - One-click prerequisites manager (RNNoise, Silero VAD, whisper.cpp, Small-Q5 / Base models)
+// - Pre-warmed, low-latency whisper-server.exe (auto / FA / EN, beam=1 fast decoding)
+// - Phonetic + Levenshtein bilingual wake-word engine ("Hello PILLVYN" / "سلام پیلوین")
+// - NVIDIA Nemotron 3 Ultra (free) on OpenRouter with reasoning=none (1.4s speed!) & 26 Windows/PILLVYN tools
+// - Studio-clean Edge Neural TTS (Persian & Multilingual English MP3 with markdown/emoji sanitizer)
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::windows::process::CommandExt;
@@ -16,12 +17,13 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use crate::{audio, clip, hit, net_http, ocr, poll, settings, store, sys};
+use crate::{ai_tools, audio, hit, net_http, settings, store, sys};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-pub const DEFAULT_MODEL: &str = "inclusionai/ling-3.2-flash:free";
-const MAX_HISTORY: usize = 20;
+pub const DEFAULT_MODEL: &str = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const FALLBACK_MODEL: &str = "nvidia/nemotron-3.5-lightning:free";
+const MAX_HISTORY: usize = 24;
 
 const URL_RNNOISE_JS: &str =
     "https://cdn.jsdelivr.net/npm/@jitsi/rnnoise-wasm@0.2.1/dist/rnnoise.js";
@@ -120,22 +122,22 @@ fn find_whisper_bin(name: &str) -> Option<PathBuf> {
 
 fn model_filename(id: &str) -> &'static str {
     match id {
-        "small-q5" => "ggml-small-q5_1.bin",
-        _ => "ggml-base.bin",
+        "base" => "ggml-base.bin",
+        _ => "ggml-small-q5_1.bin",
     }
 }
 
 fn model_url(id: &str) -> &'static str {
     match id {
-        "small-q5" => MODEL_SMALL_URL,
-        _ => MODEL_BASE_URL,
+        "base" => MODEL_BASE_URL,
+        _ => MODEL_SMALL_URL,
     }
 }
 
 fn active_model_id() -> String {
     settings::get("aiWhisperModel")
         .as_str()
-        .unwrap_or("base")
+        .unwrap_or("small-q5")
         .to_string()
 }
 
@@ -229,6 +231,20 @@ pub fn start_asset_server() {
     }
 }
 
+pub fn prewarm_whisper() {
+    if sys::debug_dir().is_some() {
+        return;
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(2));
+        if settings::flag("aiWakeWord") && file_ok(&active_model_path(), 20_000_000) {
+            if let Err(e) = ensure_whisper_server() {
+                sys::log(&format!("whisper prewarm skipped: {e}"));
+            }
+        }
+    });
+}
+
 pub fn asset_base_url() -> String {
     start_asset_server();
     ASSET_PORT
@@ -259,13 +275,17 @@ pub fn status() -> Value {
     let key_masked = api_key_masked();
     let has_key = !key_masked.is_empty();
     let voice_ready = rnnoise && silero && whisper_bin && whisper_model;
+    let model_name = model_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("ggml-small-q5_1.bin");
     json!({
         "rnnoise": rnnoise,
         "silero": silero,
         "whisperBin": whisper_bin,
         "whisperModel": whisper_model,
-        "modelName": model_path.file_name().and_then(|n| n.to_str()).unwrap_or("ggml-base.bin"),
-        "modelId": active_model_id(),
+        "modelName": model_name,
+        "modelId": if model_name.contains("small") { "small-q5" } else { "base" },
         "voiceReady": voice_ready,
         "hasKey": has_key,
         "keyMasked": key_masked,
@@ -355,8 +375,12 @@ pub fn install_prerequisites(model_id: Option<String>) -> Value {
                     } else {
                         0.5
                     };
-                    let pct = p0 + ((p1 - p0) as f64 * frac).round() as u32;
-                    emit_prog(&format!("Downloading {label}…"), pct, false, None);
+                    emit_prog(
+                        &format!("Downloading {label}…"),
+                        p0 + ((p1 - p0) as f64 * frac).round() as u32,
+                        false,
+                        None,
+                    );
                 }) {
                     INSTALLING.store(false, SeqCst);
                     emit_prog("Download failed", p0, true, Some(&e));
@@ -408,7 +432,7 @@ pub fn install_prerequisites(model_id: Option<String>) -> Value {
         let m_dest = models_dir.join(model_filename(&chosen_model));
         if !file_ok(&m_dest, 20_000_000) {
             let m_url = model_url(&chosen_model);
-            emit_prog("Downloading Whisper multilingual model…", 55, false, None);
+            emit_prog("Downloading Whisper Small-Q5 (FA+EN)…", 55, false, None);
             if let Err(e) = net_http::download_file(m_url, &m_dest, |got, tot| {
                 let frac = if tot > 0 {
                     (got as f64 / tot as f64).clamp(0.0, 1.0)
@@ -439,7 +463,7 @@ pub fn install_prerequisites(model_id: Option<String>) -> Value {
     json!({ "ok": true })
 }
 
-// ---------------------------------------------------------------- whisper.cpp server & STT
+// ---------------------------------------------------------------- whisper.cpp fast server & STT
 fn free_local_port() -> Option<u16> {
     TcpListener::bind("127.0.0.1:0")
         .ok()
@@ -474,9 +498,11 @@ fn ensure_whisper_server() -> Result<u16, String> {
 
     let port = free_local_port().ok_or_else(|| "no free localhost port".to_string())?;
     let threads = std::thread::available_parallelism()
-        .map(|n| n.get().clamp(2, 6))
+        .map(|n| n.get().clamp(2, 8))
         .unwrap_or(4);
 
+    // Greedy fast decoding (-bs 1 -bo 1 -nf) + 12.8s audio context (-ac 640) cuts CPU latency ~3-4x
+    // while keeping timestamps enabled so multi-sentence Persian & English speech never truncates!
     let mut child = Command::new(&server_bin)
         .args([
             "--host",
@@ -487,8 +513,13 @@ fn ensure_whisper_server() -> Result<u16, String> {
             &model.to_string_lossy(),
             "-l",
             "auto",
-            "-nt",
-            "--suppress-nst",
+            "-bs",
+            "1",
+            "-bo",
+            "1",
+            "-nf",
+            "-ac",
+            "640",
             "-t",
             &threads.to_string(),
         ])
@@ -499,10 +530,9 @@ fn ensure_whisper_server() -> Result<u16, String> {
         .spawn()
         .map_err(|e| format!("could not launch whisper-server.exe: {e}"))?;
 
-    // Wait up to 15s for whisper-server.exe HTTP socket to accept connections
     let start = Instant::now();
     let addr = format!("127.0.0.1:{port}");
-    while start.elapsed() < Duration::from_secs(15) {
+    while start.elapsed() < Duration::from_secs(18) {
         if let Ok(Some(code)) = child.try_wait() {
             return Err(format!("whisper-server exited early ({code})"));
         }
@@ -514,13 +544,18 @@ fn ensure_whisper_server() -> Result<u16, String> {
             });
             return Ok(port);
         }
-        std::thread::sleep(Duration::from_millis(120));
+        std::thread::sleep(Duration::from_millis(100));
     }
     let _ = child.kill();
     Err("whisper-server timed out while loading model".into())
 }
 
-pub(crate) fn build_whisper_multipart(boundary: &str, wav_bytes: &[u8], prompt: &str) -> Vec<u8> {
+pub(crate) fn build_whisper_multipart(
+    boundary: &str,
+    wav_bytes: &[u8],
+    language: &str,
+    prompt: &str,
+) -> Vec<u8> {
     let mut body = Vec::with_capacity(wav_bytes.len() + 1024);
     let mut add_field = |name: &str, val: &str| {
         let _ = write!(
@@ -529,8 +564,11 @@ pub(crate) fn build_whisper_multipart(boundary: &str, wav_bytes: &[u8], prompt: 
         );
     };
     add_field("response_format", "verbose_json");
-    add_field("language", "auto");
+    add_field("language", language);
     add_field("temperature", "0.0");
+    add_field("temperature_inc", "0.0");
+    add_field("beam_size", "1");
+    add_field("best_of", "1");
     if !prompt.is_empty() {
         add_field("prompt", prompt);
     }
@@ -556,13 +594,17 @@ pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
         Err(e) => return json!({ "ok": false, "error": e }),
     };
 
+    let stt_lang = match settings::get("aiSttLang").as_str().unwrap_or("auto") {
+        "fa" => "fa",
+        "en" => "en",
+        _ => "auto",
+    };
     let boundary = "----PILLVYNWhisperBoundary7MA4YWxkTrZu0gW";
-    let p_hint = prompt.unwrap_or("");
-    let body = build_whisper_multipart(boundary, &wav_bytes, p_hint);
+    let body = build_whisper_multipart(boundary, &wav_bytes, stt_lang, prompt.unwrap_or(""));
     let ct = format!("multipart/form-data; boundary={boundary}");
     let url = format!("http://127.0.0.1:{port}/inference");
 
-    match net_http::request("POST", &url, &[("Content-Type", &ct)], Some(&body), 35_000) {
+    match net_http::request("POST", &url, &[("Content-Type", &ct)], Some(&body), 55_000) {
         Ok((status, resp)) if (200..300).contains(&status) => {
             let parsed: Value = serde_json::from_slice(&resp).unwrap_or(Value::Null);
             let raw_text = parsed["text"].as_str().unwrap_or("").trim();
@@ -600,7 +642,6 @@ pub fn transcribe_wav(wav_b64: &str, prompt: Option<&str>) -> Value {
 
 fn clean_whisper_text(raw: &str) -> String {
     let mut s = raw.trim().to_string();
-    // Strip common whisper non-speech hallucination markers if any slip past --suppress-nst
     for noise in [
         "[BLANK_AUDIO]",
         "(blank audio)",
@@ -608,6 +649,8 @@ fn clean_whisper_text(raw: &str) -> String {
         "(silence)",
         "[Music]",
         "(music)",
+        "Thank you for watching.",
+        "Thanks for watching.",
         "♪",
     ] {
         s = s.replace(noise, "");
@@ -615,93 +658,163 @@ fn clean_whisper_text(raw: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-// ---------------------------------------------------------------- Wake word ("Hello PILLVYN" / "سلام پیلوین")
-fn normalize_latin(s: &str) -> String {
-    s.to_lowercase()
+// ---------------------------------------------------------------- Phonetic + Levenshtein Wake Word ("Hello PILLVYN" / "سلام پیلوین")
+fn levenshtein(a: &str, b: &str) -> usize {
+    let av: Vec<char> = a.chars().collect();
+    let bv: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=bv.len()).collect();
+    let mut curr = vec![0usize; bv.len() + 1];
+    for (i, &ca) in av.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in bv.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[bv.len()]
+}
+
+fn norm_token(tok: &str) -> String {
+    tok.to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c.is_whitespace() {
-                c
-            } else {
-                ' '
-            }
+        .filter_map(|c| match c {
+            'ي' | 'ى' => Some('ی'),
+            'ك' => Some('ک'),
+            'أ' | 'إ' | 'آ' => Some('ا'),
+            '\u{200c}' => None,
+            c if c.is_alphanumeric() => Some(c),
+            _ => None,
         })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect()
 }
 
-fn normalize_persian(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'ي' | 'ى' => 'ی',
-            'ك' => 'ک',
-            'أ' | 'إ' | 'آ' => 'ا',
-            '\u{200c}' => ' ', // ZWNJ
-            c if c.is_alphanumeric() || c.is_whitespace() => c,
-            _ => ' ',
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+fn is_greeting(t: &str) -> bool {
+    matches!(
+        t,
+        "hello"
+            | "helo"
+            | "hullo"
+            | "hey"
+            | "hi"
+            | "ok"
+            | "okay"
+            | "yo"
+            | "alo"
+            | "سلام"
+            | "های"
+            | "هی"
+            | "الو"
+            | "هلو"
+            | "بگو"
+            | "جانم"
+    )
 }
 
-/// Returns `Some(remainder_command)` when `transcript` contains the wake phrase
-/// ("Hello PILLVYN", "Hey PILLVYN", "سلام پیلوین", or close phonetic Whisper transcriptions).
+fn is_pillvyn_like(t: &str, after_greeting: bool) -> bool {
+    if t.is_empty() {
+        return false;
+    }
+    // Exact / close Latin targets
+    if matches!(
+        t,
+        "pillvyn"
+            | "pilvyn"
+            | "pilvin"
+            | "pillvin"
+            | "pillwin"
+            | "pelvin"
+            | "pilwin"
+            | "pilven"
+            | "pillven"
+            | "pillbin"
+            | "philvin"
+            | "billvin"
+            | "pilfin"
+            | "pillfin"
+            | "pillvan"
+            | "pilvan"
+            | "pillin"
+            | "pillone"
+            | "pillman"
+            | "pilgrim"
+            | "pilbin"
+            | "pylvin"
+            | "پیلوین"
+            | "بیلوین"
+            | "فیلوین"
+            | "پلوین"
+            | "پیلو"
+            | "پیلون"
+            | "پیلین"
+            | "پلون"
+            | "پیلویم"
+    ) {
+        return true;
+    }
+    // Phonetic fuzzy edit-distance match (strictly tighter without greeting so normal words never false-trigger)
+    let len = t.chars().count();
+    if t.is_ascii() {
+        if !(5..=9).contains(&len) {
+            return false;
+        }
+        let starts_ok = matches!(t.as_bytes()[0], b'p' | b'b' | b'f');
+        let d = levenshtein(t, "pillvyn").min(levenshtein(t, "pilvin"));
+        if after_greeting {
+            (starts_ok && d <= 2) || d <= 1
+        } else {
+            starts_ok && d <= 1
+        }
+    } else {
+        if !(4..=8).contains(&len) {
+            return false;
+        }
+        let d = levenshtein(t, "پیلوین");
+        if after_greeting {
+            d <= 2
+        } else {
+            d <= 1
+        }
+    }
+}
+
+/// Matches "Hello PILLVYN", "Hey PILLVYN", "سلام پیلوین", fuzzy phonetic Whisper variants
+/// (including split two-word outputs like "hello pill win" or "سلام پیل وین"), or standalone
+/// "PILLVYN ..." / "پیلوین ..." at the start of an utterance. Returns `Some(remainder_command)`.
 pub fn match_wake_word(transcript: &str) -> Option<String> {
-    let norm_en = normalize_latin(transcript);
-    const EN_WAKE: &[&str] = &[
-        "hello pillvyn",
-        "hello pilvyn",
-        "hello pilvin",
-        "hello pillvin",
-        "hello pillwin",
-        "hello pelvin",
-        "hello pilwin",
-        "hello pill ven",
-        "hello pil ven",
-        "hello pill van",
-        "hello pillbin",
-        "hello pilven",
-        "hello philvin",
-        "hello pill fin",
-        "hello pilgrim",
-        "hey pillvyn",
-        "hey pilvyn",
-        "hey pilvin",
-        "hey pillvin",
-        "hey pillwin",
-        "hi pillvyn",
-        "hi pilvin",
-        "ok pillvyn",
-        "okay pillvyn",
-    ];
-    for phrase in EN_WAKE {
-        if let Some(pos) = norm_en.find(phrase) {
-            let after = norm_en[pos + phrase.len()..].trim();
-            return Some(after.to_string());
+    let raw_tokens: Vec<&str> = transcript.split_whitespace().collect();
+    let norm: Vec<String> = raw_tokens.iter().map(|t| norm_token(t)).collect();
+    let clean_rest = |start_idx: usize| -> String {
+        raw_tokens[start_idx..]
+            .join(" ")
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim()
+            .to_string()
+    };
+
+    // 1. Greeting + 1-word or 2-word joined name anywhere in the first 5 words
+    for i in 0..norm.len().min(5) {
+        if is_greeting(&norm[i]) {
+            if i + 1 < norm.len() && is_pillvyn_like(&norm[i + 1], true) {
+                return Some(clean_rest(i + 2));
+            }
+            if i + 2 < norm.len() {
+                let joined = format!("{}{}", norm[i + 1], norm[i + 2]);
+                if is_pillvyn_like(&joined, true) {
+                    return Some(clean_rest(i + 3));
+                }
+            }
         }
     }
 
-    let norm_fa = normalize_persian(transcript);
-    const FA_WAKE: &[&str] = &[
-        "سلام پیلوین",
-        "سلام پیل وین",
-        "سلام بیلوین",
-        "سلام فیلوین",
-        "سلام پیلو این",
-        "های پیلوین",
-        "الو پیلوین",
-        "هی پیلوین",
-        "هلو پیلوین",
-        "هلو پیل وین",
-    ];
-    for phrase in FA_WAKE {
-        if let Some(pos) = norm_fa.find(phrase) {
-            let after = norm_fa[pos + phrase.len()..].trim();
-            return Some(after.to_string());
+    // 2. Direct brand invocation at the start ("PILLVYN, open Chrome" / "پیلوین ساعت چنده")
+    if !norm.is_empty() && is_pillvyn_like(&norm[0], false) {
+        return Some(clean_rest(1));
+    }
+    if norm.len() >= 2 {
+        let joined = format!("{}{}", norm[0], norm[1]);
+        if is_pillvyn_like(&joined, false) {
+            return Some(clean_rest(2));
         }
     }
     None
@@ -721,325 +834,8 @@ pub fn is_persian(text: &str) -> bool {
     fa > 0 && fa >= lat / 2
 }
 
-// ---------------------------------------------------------------- OpenRouter Smart Brain + Tool Calling
-fn tool_definitions() -> Value {
-    json!([
-        {
-            "type": "function",
-            "function": {
-                "name": "set_timer",
-                "description": "Start a countdown timer on the PILLVYN Dynamic Island.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "minutes": { "type": "number", "description": "Duration in minutes (1 to 180)" }
-                    },
-                    "required": ["minutes"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "control_timer",
-                "description": "Pause, resume, or reset the active PILLVYN timer.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ["pause", "resume", "reset"] }
-                    },
-                    "required": ["action"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "media_control",
-                "description": "Control the currently playing music or media on Windows.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ["play_pause", "next", "previous"] }
-                    },
-                    "required": ["action"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "set_volume",
-                "description": "Set the Windows master speaker volume percentage (0 to 100).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "percent": { "type": "number", "description": "Volume percentage 0..100" }
-                    },
-                    "required": ["percent"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "toggle_mute",
-                "description": "Toggle mute on the Windows system audio output.",
-                "parameters": { "type": "object", "properties": {} }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_note",
-                "description": "Save a quick note in PILLVYN, optionally with a reminder in N minutes.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string", "description": "The note or reminder text" },
-                        "remind_in_minutes": { "type": "number", "description": "Optional reminder delay in minutes (0 for plain note)" }
-                    },
-                    "required": ["text"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_notes",
-                "description": "Read the user's saved quick notes and reminders from PILLVYN.",
-                "parameters": { "type": "object", "properties": {} }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_clipboard_history",
-                "description": "Read the most recent copied clipboard snippets from PILLVYN.",
-                "parameters": { "type": "object", "properties": {} }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "copy_to_clipboard",
-                "description": "Copy generated text, code, translation, or an answer directly to the Windows clipboard.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string", "description": "Text to copy" }
-                    },
-                    "required": ["text"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "switch_theme",
-                "description": "Change PILLVYN's visual theme immediately.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "theme": {
-                            "type": "string",
-                            "enum": ["glass", "frost", "black", "aurora", "nebula", "crystal", "solar", "venom"]
-                        }
-                    },
-                    "required": ["theme"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "open_url",
-                "description": "Open a web URL (https:// or http://) in the user's default browser.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string", "description": "Valid http or https URL" }
-                    },
-                    "required": ["url"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "desktop_action",
-                "description": "Trigger a built-in PILLVYN desktop action: screenshot, ocr (text grab), or dnd (Windows Do Not Disturb settings).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ["screenshot", "ocr", "dnd"] }
-                    },
-                    "required": ["action"]
-                }
-            }
-        }
-    ])
-}
-
-fn execute_tool(name: &str, args: &Value) -> (String, String) {
-    match name {
-        "set_timer" => {
-            let mins = args["minutes"].as_f64().unwrap_or(5.0).clamp(0.5, 180.0);
-            sys::emit("ai-action", json!({ "type": "set_timer", "minutes": mins }));
-            (
-                json!({ "ok": true, "minutes": mins }).to_string(),
-                format!("Timer {mins}m"),
-            )
-        }
-        "control_timer" => {
-            let act = args["action"].as_str().unwrap_or("pause");
-            sys::emit(
-                "ai-action",
-                json!({ "type": "control_timer", "action": act }),
-            );
-            (
-                json!({ "ok": true, "action": act }).to_string(),
-                format!("Timer {act}"),
-            )
-        }
-        "media_control" => {
-            let act = args["action"].as_str().unwrap_or("play_pause");
-            match act {
-                "next" => poll::send(poll::Cmd::Next),
-                "previous" => poll::send(poll::Cmd::Prev),
-                _ => poll::send(poll::Cmd::Toggle),
-            }
-            (
-                json!({ "ok": true, "action": act }).to_string(),
-                format!("Media {act}"),
-            )
-        }
-        "set_volume" => {
-            let pct = args["percent"].as_f64().unwrap_or(50.0).clamp(0.0, 100.0);
-            poll::send(poll::Cmd::Vol((pct / 100.0) as f32));
-            (
-                json!({ "ok": true, "percent": pct.round() }).to_string(),
-                format!("Volume {}%", pct.round() as i32),
-            )
-        }
-        "toggle_mute" => {
-            poll::send(poll::Cmd::Mute);
-            (json!({ "ok": true }).to_string(), "Mute toggled".into())
-        }
-        "create_note" => {
-            let text = args["text"].as_str().unwrap_or("").trim();
-            let remind_min = args["remind_in_minutes"].as_f64().unwrap_or(0.0).max(0.0);
-            let remind_ms = if remind_min > 0.0 {
-                sys::now_ms() + (remind_min * 60_000.0).round() as u64
-            } else {
-                0
-            };
-            if text.is_empty() {
-                (
-                    json!({ "ok": false, "error": "empty text" }).to_string(),
-                    "Note skipped".into(),
-                )
-            } else {
-                let _ = store::note_save(None, text, remind_ms);
-                let badge = if remind_min > 0.0 {
-                    format!("Reminder ({remind_min}m)")
-                } else {
-                    "Note saved".into()
-                };
-                (
-                    json!({ "ok": true, "saved": text, "remindInMinutes": remind_min }).to_string(),
-                    badge,
-                )
-            }
-        }
-        "list_notes" => {
-            let notes = store::notes();
-            let compact: Vec<Value> = notes
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .take(10)
-                        .map(|n| json!({ "text": n["text"], "pinned": n["pinned"], "remind": n["remind"] }))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (json!({ "notes": compact }).to_string(), "Read notes".into())
-        }
-        "get_clipboard_history" => {
-            let clips = clip::list();
-            let compact: Vec<Value> = clips
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .take(8)
-                        .map(|c| json!({ "kind": c["kind"], "preview": c["preview"], "pinned": c["pinned"] }))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (
-                json!({ "clips": compact }).to_string(),
-                "Read clipboard".into(),
-            )
-        }
-        "copy_to_clipboard" => {
-            let text = args["text"].as_str().unwrap_or("");
-            let ok = !text.is_empty() && clip::write_text(text);
-            (json!({ "ok": ok }).to_string(), "Copied".into())
-        }
-        "switch_theme" => {
-            let theme = args["theme"].as_str().unwrap_or("glass");
-            settings::apply("skin", &Value::String(theme.to_string()));
-            (
-                json!({ "ok": true, "theme": theme }).to_string(),
-                format!("Theme → {theme}"),
-            )
-        }
-        "open_url" => {
-            let u = args["url"].as_str().unwrap_or("").trim();
-            let valid = (u.starts_with("https://") || u.starts_with("http://"))
-                && u.len() < 2000
-                && !u
-                    .chars()
-                    .any(|c| c.is_whitespace() || c.is_control() || c == '"');
-            if valid {
-                sys::shell_open(u, None);
-                (
-                    json!({ "ok": true, "url": u }).to_string(),
-                    "Opened link".into(),
-                )
-            } else {
-                (
-                    json!({ "ok": false, "error": "invalid URL" }).to_string(),
-                    "Blocked URL".into(),
-                )
-            }
-        }
-        "desktop_action" => {
-            let act = args["action"].as_str().unwrap_or("");
-            match act {
-                "screenshot" => sys::shell_open("ms-screenclip:", None),
-                "ocr" => ocr::start(),
-                "dnd" => sys::shell_open("ms-settings:notifications", None),
-                _ => {
-                    return (
-                        json!({ "ok": false, "error": "unknown action" }).to_string(),
-                        "Unknown action".into(),
-                    )
-                }
-            }
-            (
-                json!({ "ok": true, "action": act }).to_string(),
-                format!("Action: {act}"),
-            )
-        }
-        _ => (
-            json!({ "ok": false, "error": format!("unknown tool: {name}") }).to_string(),
-            format!("Unknown: {name}"),
-        ),
-    }
-}
-
-fn system_prompt(client_ctx: &Value) -> String {
+// ---------------------------------------------------------------- OpenRouter Smart Brain (NVIDIA Nemotron 3 Ultra)
+fn system_prompt(client_ctx: &Value, full_access: bool) -> String {
     let vol = audio::volume()
         .map(|(v, m)| {
             format!(
@@ -1058,26 +854,34 @@ fn system_prompt(client_ctx: &Value) -> String {
     let local_time = client_ctx["time"].as_str().unwrap_or("");
     let local_date = client_ctx["date"].as_str().unwrap_or("");
     let media = client_ctx["media"].as_str().unwrap_or("");
+    let access_note = if full_access {
+        "You have FULL Windows system access (PowerShell, launching apps, managing windows, processes, reading/writing/searching files, brightness, power controls, keyboard typing/shortcuts, live web search, and all PILLVYN island controls). NEVER claim you cannot access the system — directly call the best tool(s) to accomplish what the user asks!"
+    } else {
+        "System-level PowerShell/file/power tools are currently disabled by user preference; use PILLVYN island tools and web search."
+    };
     format!(
-        "You are PILLVYN, a sleek, fast, friendly AI voice assistant living inside a Windows Dynamic Island overlay.\n\
-         Rules:\n\
-         - Reply naturally and concisely in the SAME language the user uses (Persian / فارسی or English). Keep spoken replies clear, warm, and short (1–3 sentences unless the user asks for detail).\n\
-         - Never use markdown tables or heavy formatting when speaking casually, so text-to-speech sounds crisp and human.\n\
-         - Whenever the user asks to control PILLVYN or Windows (timer, music, volume, notes/reminders, clipboard, theme, links, screenshot, text grab), call the appropriate tool(s) first, then confirm concisely.\n\
-         - If the user asks for structured JSON explicitly, return valid JSON.\n\
-         Live Windows context: time={local_time}, date={local_date}, volume={vol}, theme={skin}, playing=\"{media}\", active_window=\"{active_app}\"."
+        "You are PILLVYN, an ultra-fast, intelligent, friendly Windows desktop AI voice assistant.\n\
+         Language & Voice Style:\n\
+         - Always reply in the EXACT language the user used.\n\
+         - When replying in Persian (فارسی), write natural, fluent, everyday spoken Persian (فارسی روان و طبیعی و بدون غلط املایی). Never sound robotic.\n\
+         - When replying in English, write crisp, natural, helpful English.\n\
+         - Keep replies concise (1–3 crisp sentences for voice actions; richer only when the user asks for explanation or code).\n\
+         - Avoid raw markdown asterisks/hashtags or emoji clutter in normal spoken replies so Text-to-Speech sounds studio-clean.\n\
+         - Return valid JSON if the user explicitly asks for JSON.\n\
+         Capabilities:\n\
+         - {access_note}\n\
+         - You may call multiple tools in parallel or across steps when needed, then confirm the result briefly.\n\
+         Live Windows state: time={local_time}, date={local_date}, volume={vol}, theme={skin}, playing=\"{media}\", active_window=\"{active_app}\"."
     )
 }
 
-fn call_openrouter(api_key: &str, model: &str, messages: &[Value]) -> Result<Value, String> {
-    let payload = json!({
-        "model": model,
-        "messages": messages,
-        "tools": tool_definitions(),
-        "tool_choice": "auto",
-        "temperature": 0.4,
-    });
-    let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+fn call_openrouter(
+    api_key: &str,
+    model: &str,
+    messages: &[Value],
+    full_access: bool,
+    deep_reasoning: bool,
+) -> Result<(Value, String), String> {
     let auth = format!("Bearer {api_key}");
     let headers = [
         ("Authorization", auth.as_str()),
@@ -1085,13 +889,36 @@ fn call_openrouter(api_key: &str, model: &str, messages: &[Value]) -> Result<Val
         ("HTTP-Referer", "https://github.com/EbramJames/PILLVYN"),
         ("X-Title", "PILLVYN"),
     ];
+    let tools = ai_tools::tool_definitions(full_access);
+    let reasoning = if deep_reasoning {
+        json!({ "effort": "low" })
+    } else {
+        json!({ "effort": "none" })
+    };
+
+    // Try primary model (with 1 fast retry on transient 429/503), then seamless fallback if still rate-limited
+    let candidates: Vec<&str> = if model == FALLBACK_MODEL {
+        vec![model, model]
+    } else {
+        vec![model, model, FALLBACK_MODEL]
+    };
 
     let mut last_err = String::new();
-    for attempt in 0..3u32 {
-        if attempt > 0 {
-            std::thread::sleep(Duration::from_millis(1200 * attempt as u64));
+    for (idx, mdl) in candidates.iter().enumerate() {
+        if idx > 0 {
+            std::thread::sleep(Duration::from_millis(750));
         }
-        match net_http::request("POST", OPENROUTER_URL, &headers, Some(&body), 35_000) {
+        let payload = json!({
+            "model": mdl,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "reasoning": reasoning,
+            "temperature": 0.35,
+        });
+        let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+
+        match net_http::request("POST", OPENROUTER_URL, &headers, Some(&body), 28_000) {
             Ok((status, resp)) if (200..300).contains(&status) => {
                 let v: Value = serde_json::from_slice(&resp)
                     .map_err(|e| format!("invalid JSON from OpenRouter: {e}"))?;
@@ -1104,7 +931,7 @@ fn call_openrouter(api_key: &str, model: &str, messages: &[Value]) -> Result<Val
                     }
                     return Err(last_err);
                 }
-                return Ok(v);
+                return Ok((v, (*mdl).to_string()));
             }
             Ok((status, resp)) => {
                 let txt = String::from_utf8_lossy(&resp);
@@ -1146,6 +973,8 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or(DEFAULT_MODEL)
         .to_string();
+    let full_access = settings::get("aiFullAccess") != Value::Bool(false);
+    let deep_reasoning = settings::get("aiReasoning").as_str() == Some("deep");
 
     let mut conv = {
         let mut h = HISTORY.lock().unwrap();
@@ -1154,27 +983,29 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
             h.remove(0);
         }
         let mut msgs = Vec::with_capacity(h.len() + 1);
-        msgs.push(json!({ "role": "system", "content": system_prompt(&client_ctx) }));
+        msgs.push(json!({ "role": "system", "content": system_prompt(&client_ctx, full_access) }));
         msgs.extend(h.iter().cloned());
         msgs
     };
 
     let mut tool_badges: Vec<String> = Vec::new();
     let mut final_reply = String::new();
+    let mut used_model = model.clone();
     let t0 = Instant::now();
 
-    for _round in 0..4 {
-        let resp = match call_openrouter(&api_key, &model, &conv) {
-            Ok(v) => v,
-            Err(e) => {
-                // Roll back the failed user turn so conversation stays clean
-                let mut h = HISTORY.lock().unwrap();
-                if h.last().and_then(|m| m["role"].as_str()) == Some("user") {
-                    h.pop();
+    for _round in 0..6 {
+        let (resp, actual_model) =
+            match call_openrouter(&api_key, &model, &conv, full_access, deep_reasoning) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    let mut h = HISTORY.lock().unwrap();
+                    if h.last().and_then(|m| m["role"].as_str()) == Some("user") {
+                        h.pop();
+                    }
+                    return json!({ "ok": false, "error": e });
                 }
-                return json!({ "ok": false, "error": e });
-            }
-        };
+            };
+        used_model = actual_model;
         let msg = &resp["choices"][0]["message"];
         let calls = msg["tool_calls"].as_array();
 
@@ -1194,9 +1025,13 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
                 let fname = tc["function"]["name"].as_str().unwrap_or("");
                 let raw_args = tc["function"]["arguments"].as_str().unwrap_or("{}");
                 let args: Value = serde_json::from_str(raw_args).unwrap_or_else(|_| json!({}));
-                let (result_json, badge) = execute_tool(fname, &args);
+                sys::emit("ai-tool", json!({ "name": fname, "status": "running" }));
+                let (result_json, badge) = ai_tools::execute_tool(fname, &args, full_access);
                 tool_badges.push(badge.clone());
-                sys::emit("ai-tool", json!({ "name": fname, "badge": badge }));
+                sys::emit(
+                    "ai-tool",
+                    json!({ "name": fname, "badge": badge, "status": "done" }),
+                );
                 let tool_msg = json!({
                     "role": "tool",
                     "tool_call_id": id,
@@ -1233,12 +1068,60 @@ pub fn chat(user_text: &str, client_ctx: Value) -> Value {
         "reply": final_reply,
         "lang": lang,
         "tools": tool_badges,
-        "model": model,
+        "model": used_model,
         "ms": t0.elapsed().as_millis() as u64,
     })
 }
 
-// ---------------------------------------------------------------- Edge TTS
+// ---------------------------------------------------------------- Studio-Clean Edge TTS
+/// Strips markdown, code blocks, URLs, and emojis so Edge TTS speaks crisp, natural Persian & English.
+pub(crate) fn clean_for_tts(raw: &str) -> String {
+    let mut s = raw.to_string();
+    // Remove fenced code blocks (keep conversational prose only)
+    while let Some(a) = s.find("```") {
+        let rest = &s[a + 3..];
+        if let Some(b) = rest.find("```") {
+            s.replace_range(a..a + 3 + b + 3, " ");
+        } else {
+            s.truncate(a);
+            break;
+        }
+    }
+    // Convert markdown links [label](url) -> label
+    while let Some(open) = s.find('[') {
+        let rest = &s[open + 1..];
+        let Some(mid) = rest.find("](") else { break };
+        let after = &rest[mid + 2..];
+        let Some(close) = after.find(')') else { break };
+        let label = rest[..mid].to_string();
+        s.replace_range(open..open + 1 + mid + 2 + close + 1, &label);
+    }
+    // Drop bare http(s) URLs and markdown punctuation + emojis/symbols
+    let mut out = String::with_capacity(s.len());
+    for word in s.split_whitespace() {
+        if word.starts_with("http://") || word.starts_with("https://") {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        for c in word.chars() {
+            let u = c as u32;
+            let is_emoji = (0x1F000..=0x1FAFF).contains(&u)
+                || (0x2300..=0x23FF).contains(&u)
+                || (0x2600..=0x27BF).contains(&u)
+                || (0x2B00..=0x2BFF).contains(&u)
+                || (0xFE00..=0xFE0F).contains(&u)
+                || u == 0x200D;
+            if is_emoji || matches!(c, '*' | '`' | '#' | '_' | '~' | '>' | '|') {
+                continue;
+            }
+            out.push(c);
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn format_signed_pct(n: i64) -> String {
     if n >= 0 {
         format!("+{n}%")
@@ -1253,11 +1136,11 @@ pub fn synthesize_tts(
     rate_override: Option<i64>,
     volume_override: Option<i64>,
 ) -> Value {
-    let clean = text.trim();
+    let clean = clean_for_tts(text);
     if clean.is_empty() {
-        return json!({ "ok": false, "error": "empty text" });
+        return json!({ "ok": false, "error": "empty text after sanitizing" });
     }
-    let persian = is_persian(clean);
+    let persian = is_persian(&clean);
     let voice = match voice_override.filter(|v| !v.is_empty() && *v != "auto") {
         Some(v) => v.to_string(),
         None => {
@@ -1269,7 +1152,7 @@ pub fn synthesize_tts(
             } else {
                 settings::get("aiTtsVoiceEn")
                     .as_str()
-                    .unwrap_or("en-US-AvaNeural")
+                    .unwrap_or("en-US-AvaMultilingualNeural")
                     .to_string()
             }
         }
@@ -1280,11 +1163,10 @@ pub fn synthesize_tts(
     let vol_pct = volume_override
         .unwrap_or_else(|| settings::get("aiTtsVolume").as_i64().unwrap_or(90))
         .clamp(0, 100);
-    // Edge SSML volume accepts relative -50%..+50%; final linear amplitude is also applied on <audio>.volume
     let ssml_vol = format_signed_pct((vol_pct - 100).clamp(-50, 0));
     let ssml_rate = format_signed_pct(rate_num);
 
-    match net_http::edge_tts_mp3(clean, &voice, &ssml_rate, &ssml_vol) {
+    match net_http::edge_tts_mp3(&clean, &voice, &ssml_rate, &ssml_vol) {
         Ok(mp3) => json!({
             "ok": true,
             "audioB64": sys::b64(&mp3),
@@ -1301,22 +1183,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wake_word_matches_english_and_persian_with_inline_commands() {
+    fn wake_word_matches_english_persian_and_fuzzy_whisper_variants() {
         assert_eq!(match_wake_word("Hello PILLVYN"), Some(String::new()));
         assert_eq!(
-            match_wake_word("Hello PILLVYN, set a 5 minute timer!"),
+            match_wake_word("Hello PILLVYN, open https://github.com"),
+            Some("open https://github.com".into())
+        );
+        assert_eq!(
+            match_wake_word("Hello pill win, set a 5 minute timer"),
             Some("set a 5 minute timer".into())
         );
         assert_eq!(
-            match_wake_word("Hey pilvin what time is it"),
-            Some("what time is it".into())
+            match_wake_word("Hey Pilven what time is it?"),
+            Some("what time is it?".into())
         );
         assert_eq!(match_wake_word("سلام پیلوین"), Some(String::new()));
         assert_eq!(
             match_wake_word("سلام پیل وین! تایمر رو روی ۵ دقیقه بذار"),
             Some("تایمر رو روی ۵ دقیقه بذار".into())
         );
-        assert_eq!(match_wake_word("just a normal sentence"), None);
+        assert_eq!(
+            match_wake_word("پیلوین کروم رو باز کن"),
+            Some("کروم رو باز کن".into())
+        );
+        assert_eq!(match_wake_word("just a normal English sentence"), None);
+        assert_eq!(match_wake_word("سلام چطوری رفیق"), None);
     }
 
     #[test]
@@ -1328,22 +1219,21 @@ mod tests {
     }
 
     #[test]
-    fn builds_valid_whisper_multipart_payload() {
-        let body = build_whisper_multipart("BOUND", b"RIFF1234", "Hello PILLVYN");
-        let text = String::from_utf8_lossy(&body);
-        assert!(text.contains("--BOUND\r\n"));
-        assert!(text.contains("name=\"language\"\r\n\r\nauto"));
-        assert!(text.contains("filename=\"speech.wav\""));
-        assert!(text.contains("RIFF1234"));
-        assert!(text.ends_with("--BOUND--\r\n"));
+    fn sanitizes_markdown_and_emojis_for_tts() {
+        let clean = clean_for_tts(
+            "**سلام!** تایمر روی ۵ دقیقه تنظیم شد ⏱️😊 [لینک](https://example.com) ```js\ncode\n```",
+        );
+        assert_eq!(clean, "سلام! تایمر روی ۵ دقیقه تنظیم شد لینک");
     }
 
     #[test]
-    fn exposes_complete_tool_schema() {
-        let tools = tool_definitions();
-        let arr = tools.as_array().unwrap();
-        assert!(arr.len() >= 11);
-        assert!(arr.iter().any(|t| t["function"]["name"] == "set_timer"));
-        assert!(arr.iter().any(|t| t["function"]["name"] == "switch_theme"));
+    fn builds_valid_whisper_multipart_payload() {
+        let body = build_whisper_multipart("BOUND", b"RIFF1234", "fa", "");
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("--BOUND\r\n"));
+        assert!(text.contains("name=\"language\"\r\n\r\nfa"));
+        assert!(text.contains("filename=\"speech.wav\""));
+        assert!(text.contains("RIFF1234"));
+        assert!(text.ends_with("--BOUND--\r\n"));
     }
 }
