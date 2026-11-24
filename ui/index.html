@@ -30,6 +30,7 @@
     <span class="sep"></span>
     <button class="ib hidden" id="t-track" data-icon="note" data-tip="Now playing"></button>
     <button class="ib" id="t-play" data-icon="play" data-tip="Play / Pause"></button>
+    <button class="ib ai-btn" data-act="ai" id="t-ai" data-icon="ai" data-tip="PILLVYN AI" data-key="Ctrl+Alt+A"></button>
     <button class="ib" data-act="screenshot" data-icon="shot" data-tip="Screenshot"></button>
     <button class="ib" data-act="ocr" data-icon="scan" data-tip="Text grab" data-key="Ctrl+Alt+T"></button>
     <button class="ib" data-act="clips" id="t-clips" data-icon="clipboard" data-tip="Clipboard history"></button>
@@ -125,6 +126,17 @@
     <button class="ib small" id="g-cancel" data-icon="close" title="Close without saving"></button>
   </div>
 
+  <!-- PILLVYN AI voice assistant pill view -->
+  <div class="view" data-view="ai">
+    <span id="ai-orb"><i></i></span>
+    <span id="ai-pill-state" class="strong">PILLVYN AI</span>
+    <span id="ai-pill-text" class="mqbox dim" dir="auto"><span class="mq">Say “Hello PILLVYN” or ask anything…</span></span>
+    <button class="ib small" id="ai-pill-mic" data-icon="mic" title="Listen / Stop"></button>
+    <button class="ib small hidden" id="ai-pill-stop" data-icon="muted" title="Stop speaking"></button>
+    <button class="ib small" id="ai-pill-chat" data-icon="more" title="Show conversation"></button>
+    <button class="ib small" id="ai-pill-close" data-icon="close" title="Close AI"></button>
+  </div>
+
   <!-- track position: a hairline that becomes a scrubber when the cursor reaches the bottom edge -->
   <div id="seek"><i id="seek-fill"></i><b id="seek-knob"></b></div>
 
@@ -147,5 +159,6 @@
 
 <script src="bridge.js"></script>
 <script src="app.js"></script>
+<script src="ai.js"></script>
 </body>
 </html>

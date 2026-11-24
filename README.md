@@ -19,12 +19,13 @@ catches your notifications, remembers what you copied, holds your files, and ada
 
 [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [فارسی](#فارسی)
 
-<img src="docs/hero.jpg" width="860" alt="PILLVYN v3.2.0 Studio Edition Dynamic Island for Windows">
+<img src="docs/hero.jpg" width="860" alt="PILLVYN v3.3.0 Voice AI Dynamic Island for Windows">
 
 </div>
 
 ## What it does
 
+- **Hands-Free Voice AI Assistant (`“Hello PILLVYN”` / `«سلام پیلوین»` · `Ctrl+Alt+A`).** Built-in bilingual Persian & English voice pipeline: **RNNoise** real-time noise removal → **Silero VAD** ONNX sentence endpointing → local **whisper.cpp** auto-detect STT → **OpenRouter** (`inclusionai/ling-3.2-flash:free`) multi-turn brain with live **Tool Calling** (timers, music, volume, notes, reminders, clipboard, themes, links, screenshot, OCR) → native **Microsoft Edge Neural TTS** (Persian & English voices with speed and volume controls). API keys are encrypted per-user with Windows DPAPI and never leave your device except to OpenRouter; local voice models download on demand in one click from **Settings → AI**.
 - **Studio-Grade Glass & Atmospheric Themes.** Translucent dark **Liquid Glass** (`glass`) and bright daylight **Frosted Pearl** (`frost`) with optical specular edges, drifting caustics, and cursor-reactive rim light — alongside **Obsidian**, **Aurora**, **Nebula**, **Sapphire**, **Amber Horizon**, and **Venom**, each with cohesive themed dropdown surfaces.
 - **Effortless Interactions.** Hover or click the resting pill for instant tools with floating shortcut tooltips, right-click the pill to jump straight into **Settings Studio**, press `Esc` to dismiss open panels, and drag or scroll the interactive volume slider.
 - **Now playing.** Title, artist, album art with dynamic cover-accent glow, gradient audio visualizer bars, transport controls, and an interactive hover scrubber for Windows media sessions. Films and fullscreen games are left alone.
@@ -86,6 +87,7 @@ Icons can be regenerated anytime from master artwork with `scripts/generate-icon
 
 ### امکانات
 
+- **دستیار هوش مصنوعی صوتی (فارسی و انگلیسی · `Ctrl+Alt+A`):** با گفتن «سلام پیلوین» یا `Hello PILLVYN` بیدار می‌شود؛ حذف نویز زنده با **RNNoise**، تشخیص پایان جمله با **Silero VAD**، تبدیل گفتار به متن آفلاین با **whisper.cpp** (تشخیص خودکار فارسی و انگلیسی)، مغز هوشمند **OpenRouter (`inclusionai/ling-3.2-flash:free`)** با مکالمهٔ چندمرحله‌ای و اجرای ابزارها (تایمر، موزیک، صدا، یادداشت، کلیپ‌بورد، تم و اسکرین‌شات) و تبدیل متن به گفتار با **Edge TTS** (صداهای فارسی دلارا/فرید و انگلیسی با کنترل سرعت و بلندی صدا). کلید API با رمزنگاری Windows DPAPI روی سیستم خودت ذخیره می‌شود.
 - **تم‌های شیشه‌ای (Liquid Glass و Frosted Pearl) و تم‌های استودیویی:** تم شیشه‌ای تیره (**Liquid Glass**) و تم شیشه‌ای روشن (**Frosted Pearl**) با انعکاس نور در لبه‌ها و واکنش به مکان‌نما، به‌همراه **Obsidian**، **Aurora**، **Nebula**، **Sapphire**، **Amber Horizon** و **Venom**.
 - **تعامل سریع و روان:** کلیک روی جزیره برای باز شدن فوری ابزارها، تولتیپ شناور با نمایش میانبرها، راست‌کلیک برای باز کردن مستقیم تنظیمات، اسلایدر قابل‌کشیدن برای تنظیم صدا و تایمر با کلیدهای سریع ۵، ۱۵ و ۲۵ دقیقه.
 - **تنظیمات دسته‌بندی‌شده داخل خود جزیره:** چهار تب منظم (**Style**، **Behavior**، **Tools**، **About**) با گالری تصویری تم‌ها، تنظیم فاصله از بالای صفحه (`0–24px`)، افکت‌های صوتی ظریف و انتخاب حالت استراحت جزیره (**Eyes**، **Clock** یا **Logo**).

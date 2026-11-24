@@ -143,6 +143,12 @@ unsafe fn take(out: CRYPT_INTEGER_BLOB) -> Vec<u8> {
     let _ = LocalFree(Some(HLOCAL(out.pbData as *mut _)));
     v
 }
+pub(crate) fn dpapi_protect(data: &[u8]) -> Option<Vec<u8>> {
+    protect(data)
+}
+pub(crate) fn dpapi_unprotect(data: &[u8]) -> Option<Vec<u8>> {
+    unprotect(data)
+}
 fn protect(data: &[u8]) -> Option<Vec<u8>> {
     unsafe {
         let mut out = CRYPT_INTEGER_BLOB::default();

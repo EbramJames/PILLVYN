@@ -1,11 +1,14 @@
 // PILLVYN — a tiny dynamic island for Windows. Rust backend; the pill itself is a transparent WebView2 page.
 #![windows_subsystem = "windows"]
 
+mod ai;
+mod ai_mic;
 mod audio;
 mod clip;
 mod hit;
 mod media;
 mod net;
+mod net_http;
 mod notif;
 mod ocr;
 mod poll;
@@ -321,6 +324,40 @@ fn vault_remove(id: u64) -> bool {
     store::vault_remove(id)
 }
 
+// ---------------------------------------------------------------- commands: AI Voice Assistant
+#[tauri::command]
+fn ai_status() -> Value {
+    ai::status()
+}
+#[tauri::command]
+fn ai_install(model: Option<String>) -> Value {
+    ai::install_prerequisites(model)
+}
+#[tauri::command]
+fn ai_set_key(key: String) -> bool {
+    ai::set_api_key(&key)
+}
+#[tauri::command]
+fn ai_set_mic(on: bool) {
+    ai_mic::set_enabled(on);
+}
+#[tauri::command(async)]
+fn ai_transcribe(wav_b64: String, prompt: Option<String>) -> Value {
+    ai::transcribe_wav(&wav_b64, prompt.as_deref())
+}
+#[tauri::command(async)]
+fn ai_chat(text: String, ctx: Option<Value>) -> Value {
+    ai::chat(&text, ctx.unwrap_or(Value::Null))
+}
+#[tauri::command]
+fn ai_clear() {
+    ai::clear_history();
+}
+#[tauri::command(async)]
+fn ai_tts(text: String, voice: Option<String>, rate: Option<i64>, volume: Option<i64>) -> Value {
+    ai::synthesize_tts(&text, voice.as_deref(), rate, volume)
+}
+
 #[tauri::command]
 fn debug_out(text: String) {
     if let Some(d) = sys::debug_dir() {
@@ -356,6 +393,7 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
         .item(&title)
         .separator()
         .text("settings", "Open Settings…")
+        .text("ai", "AI Assistant  (Ctrl+Alt+A)")
         .text("tour", "What PILLVYN can do")
         .text("note", "Quick Note  (Ctrl+Alt+N)")
         .text("ocr", "Text Grab  (Ctrl+Alt+T)")
@@ -376,6 +414,7 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, ev| match ev.id().as_ref() {
             "settings" => sys::emit("open", "settings"),
+            "ai" => sys::emit("open", "ai"),
             "tour" => sys::emit("open", "tour"),
             "note" => sys::emit("hotkey", "note"),
             "ocr" => ocr::start(),
@@ -385,8 +424,14 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
                 settings::set_autostart(on);
                 settings::broadcast();
             }
-            "restart" => app.restart(),
-            "quit" => app.exit(0),
+            "restart" => {
+                ai::stop_whisper();
+                app.restart();
+            }
+            "quit" => {
+                ai::stop_whisper();
+                app.exit(0);
+            }
             _ => {}
         })
         .build(app)?;
@@ -438,7 +483,8 @@ fn main() {
             shelf_get, shelf_add, shelf_add_data, shelf_add_url, shelf_remove, shelf_clear, shelf_reveal, shelf_drag, open_download,
             settings_get, settings_set, action, open_url, ocr_done, speedo_cmd, update_check, update_install,
             notes_get, note_save, note_pin, note_fired, note_remove,
-            vault_list, vault_generate, vault_save, vault_edit, fg_context, vault_copy, copy_secret, vault_reveal, vault_remove, debug_out
+            vault_list, vault_generate, vault_save, vault_edit, fg_context, vault_copy, copy_secret, vault_reveal, vault_remove,
+            ai_status, ai_install, ai_set_key, ai_set_mic, ai_transcribe, ai_chat, ai_clear, ai_tts, debug_out
         ])
         .setup(move |app| {
             let _ = sys::APP.set(app.handle().clone());
@@ -482,6 +528,8 @@ fn main() {
             clip::load();
             poll::start();
             audio::start_viz();
+            ai::start_asset_server();
+            ai_mic::start();
             shelf::start_downloads();
             notif::scan_shortcuts();
             hit::start_hotkey();

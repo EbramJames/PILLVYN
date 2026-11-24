@@ -14,6 +14,7 @@ window.pillvyn = {
   onCursor: on('cursor'), onHelper: on('helper'), onSettings: on('settings'), onClip: on('clip'), onDownload: on('download'),
   onShelf: on('shelf'), onShelfDragging: on('shelf-dragging'), onClips: on('clips'), onLevels: on('levels'),
   onPress: on('press'), onRelease: on('release'), onOpen: on('open'), onHotkey: on('hotkey'), onNotes: on('notes'), onVault: on('vault'), onOcr: on('ocr'), onOcrRead: on('ocr-read'), onSpeedo: on('speedo'),
+  onAiPcm: on('ai-pcm'), onAiMic: on('ai-mic'), onAiInstall: on('ai-install'), onAiStatus: on('ai-status'), onAiTool: on('ai-tool'), onAiAction: on('ai-action'),
 
   setInteractive: (v) => quiet(invoke('set_interactive', { on: !!v })),
   setTyping: (v, restore) => invoke('set_typing', { on: !!v, restore: !!restore }).catch(() => ({})),
@@ -82,6 +83,20 @@ window.pillvyn = {
   copySecret: (text) => invoke('copy_secret', { text }),
   vaultReveal: (id) => invoke('vault_reveal', { id }),
   vaultRemove: (id) => invoke('vault_remove', { id }),
+
+  aiStatus: () => invoke('ai_status').catch(() => ({})),
+  aiInstall: (model) => invoke('ai_install', { model: model || null }).catch((e) => ({ ok: false, error: String(e) })),
+  aiSetKey: (key) => invoke('ai_set_key', { key: String(key || '') }).catch(() => false),
+  aiSetMic: (on) => quiet(invoke('ai_set_mic', { on: !!on })),
+  aiTranscribe: (wavB64, prompt) => invoke('ai_transcribe', { wavB64, prompt: prompt || null }).catch((e) => ({ ok: false, error: String(e) })),
+  aiChat: (text, ctx) => invoke('ai_chat', { text: String(text || ''), ctx: ctx || {} }).catch((e) => ({ ok: false, error: String(e) })),
+  aiClear: () => quiet(invoke('ai_clear')),
+  aiTts: (text, voice, rate, volume) => invoke('ai_tts', {
+    text: String(text || ''),
+    voice: voice || null,
+    rate: rate === undefined || rate === null ? null : Number(rate),
+    volume: volume === undefined || volume === null ? null : Number(volume),
+  }).catch((e) => ({ ok: false, error: String(e) })),
 };
 window.addEventListener('error', (e) => quiet(invoke('debug_out', { text: '[page error] ' + e.message + ' @' + e.lineno })));
 })();

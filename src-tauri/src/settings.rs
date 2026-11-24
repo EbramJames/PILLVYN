@@ -24,11 +24,21 @@ const THEMES: [&str; 14] = [
     "cloud", "water", "lava", "ice",
 ];
 const FACES: [&str; 3] = ["eyes", "clock", "logo"];
-const BOOLS: [&str; 17] = [
+const WHISPER_MODELS: [&str; 2] = ["base", "small-q5"];
+const VOICES_FA: [&str; 2] = ["fa-IR-DilaraNeural", "fa-IR-FaridNeural"];
+const VOICES_EN: [&str; 4] = [
+    "en-US-AvaNeural",
+    "en-US-AndrewNeural",
+    "en-US-EmmaNeural",
+    "en-US-BrianNeural",
+];
+const BOOLS: [&str; 19] = [
     "autoUpdate",
     "musicReact",
     "shimmer",
     "sounds",
+    "aiWakeWord",
+    "aiTtsAuto",
     "netAlerts",
     "sensorDot",
     "smartCopy",
@@ -52,12 +62,20 @@ fn defaults() -> Map<String, Value> {
         "notifSeconds": 4,          // how long a notification stays on the pill
         "topOffset": 0,             // extra vertical offset from the top screen edge (0..=24 px)
         "face": "eyes",             // what the resting pill shows: "eyes", "clock", or "logo"
-        "noteHotkey": true,         // Ctrl+Alt+N opens the quick note from anywhere
+        "noteHotkey": true,         // Ctrl+Alt+N note, Ctrl+Alt+T text grab, Ctrl+Alt+A AI assistant
         "vaultLength": 18, "vaultSymbols": true, "lastUser": "",
         "skin": "glass",            // the resting pill: liquid glass, frosted pearl, obsidian, or an animated theme
         "musicTheme": "sky",        // what plays behind the track: "sky" or an animated skin
         "shimmer": true,            // glass rim glint & state-change shimmer sweep
         "sounds": true,             // subtle UI micro-acoustic feedback chimes
+        "aiWakeWord": false,        // continuous RNNoise + Silero VAD wake-word listener ("Hello PILLVYN")
+        "aiTtsAuto": true,          // automatically speak assistant replies via Edge TTS
+        "aiModel": "inclusionai/ling-3.2-flash:free",
+        "aiWhisperModel": "base",
+        "aiTtsVoiceFa": "fa-IR-DilaraNeural",
+        "aiTtsVoiceEn": "en-US-AvaNeural",
+        "aiTtsRate": 0,             // Edge TTS speech speed percentage (-50..=100)
+        "aiTtsVolume": 90,          // Edge TTS playback volume percentage (0..=100)
         "netAlerts": true, "sensorDot": true, "smartCopy": true, "musicReact": true, "autoUpdate": true,
     })
     .as_object()
@@ -85,6 +103,14 @@ fn valid_top_offset(v: f64) -> Option<i64> {
 fn valid_vault_length(v: f64) -> Option<i64> {
     let n = v.round() as i64;
     (8..=40).contains(&n).then_some(n)
+}
+fn valid_tts_rate(v: f64) -> Option<i64> {
+    let n = v.round() as i64;
+    (-50..=100).contains(&n).then_some(n)
+}
+fn valid_tts_volume(v: f64) -> Option<i64> {
+    let n = v.round() as i64;
+    (0..=100).contains(&n).then_some(n)
 }
 
 pub fn top_offset() -> isize {
@@ -129,6 +155,9 @@ pub fn put(key: &str, value: Value) {
 }
 pub fn payload() -> Value {
     let mut map = with(|m| m.clone());
+    let masked = crate::ai::api_key_masked();
+    map.insert("aiHasKey".into(), (!masked.is_empty()).into());
+    map.insert("aiKeyMasked".into(), masked.into());
     map.insert("autoStartOn".into(), autostart_on().into());
     map.insert("version".into(), env!("CARGO_PKG_VERSION").into());
     map.insert("appName".into(), sys::APP_NAME.into());
@@ -186,6 +215,41 @@ pub fn apply(key: &str, value: &Value) {
         }
         "vaultLength" => {
             if let Some(n) = value.as_f64().and_then(valid_vault_length) {
+                put(key, n.into());
+            }
+        }
+        "aiModel" => {
+            if let Some(v) = value
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && s.len() <= 120)
+            {
+                put(key, v.into());
+            }
+        }
+        "aiWhisperModel" => {
+            if let Some(v) = value.as_str().filter(|v| WHISPER_MODELS.contains(v)) {
+                put(key, v.into());
+                crate::ai::stop_whisper();
+            }
+        }
+        "aiTtsVoiceFa" => {
+            if let Some(v) = value.as_str().filter(|v| VOICES_FA.contains(v)) {
+                put(key, v.into());
+            }
+        }
+        "aiTtsVoiceEn" => {
+            if let Some(v) = value.as_str().filter(|v| VOICES_EN.contains(v)) {
+                put(key, v.into());
+            }
+        }
+        "aiTtsRate" => {
+            if let Some(n) = value.as_f64().and_then(valid_tts_rate) {
+                put(key, n.into());
+            }
+        }
+        "aiTtsVolume" => {
+            if let Some(n) = value.as_f64().and_then(valid_tts_volume) {
                 put(key, n.into());
             }
         }
@@ -317,5 +381,15 @@ mod tests {
         assert_eq!(valid_vault_length(40.0), Some(40));
         assert_eq!(valid_vault_length(7.0), None);
         assert_eq!(valid_vault_length(41.0), None);
+
+        assert_eq!(valid_tts_rate(-50.0), Some(-50));
+        assert_eq!(valid_tts_rate(100.0), Some(100));
+        assert_eq!(valid_tts_rate(-51.0), None);
+        assert_eq!(valid_tts_rate(101.0), None);
+
+        assert_eq!(valid_tts_volume(0.0), Some(0));
+        assert_eq!(valid_tts_volume(100.0), Some(100));
+        assert_eq!(valid_tts_volume(-1.0), None);
+        assert_eq!(valid_tts_volume(101.0), None);
     }
 }

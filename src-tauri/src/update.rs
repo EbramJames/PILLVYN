@@ -130,7 +130,7 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     out
 }
 
-fn sha256_hex(data: &[u8]) -> String {
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(64);
     for b in sha256_bytes(data) {
@@ -330,9 +330,9 @@ mod tests {
     #[test]
     fn versions_compare_by_number() {
         assert!(newer("3.10.0", "3.9.9"));
-        assert!(newer("v3.2.1", "3.2.0"));
-        assert!(newer("3.2.0", "3.1.0"));
-        assert!(!newer("3.2.0", "3.2.0"));
-        assert!(!newer("", "3.2.0"));
+        assert!(newer("v3.3.1", "3.3.0"));
+        assert!(newer("3.3.0", "3.2.0"));
+        assert!(!newer("3.3.0", "3.3.0"));
+        assert!(!newer("", "3.3.0"));
     }
 }

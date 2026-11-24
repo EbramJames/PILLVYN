@@ -59,6 +59,9 @@ const ICONS = {
   sparkles: `<path ${S} d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6zM18.5 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7zM5.5 15.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z"/>`,
   info: `<circle ${S} cx="12" cy="12" r="8.5"/><path ${S} d="M12 11v5.2"/><circle fill="currentColor" cx="12" cy="8" r="1.1"/>`,
   ext: `<path ${S} d="M14 5h5v5M19 5l-8.5 8.5M10 6.5H6.5A2 2 0 0 0 4.5 8.5v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V14"/>`,
+  ai: `<path ${S} d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><circle fill="currentColor" cx="18.2" cy="17.8" r="1.4"/><circle fill="currentColor" cx="6" cy="17.2" r="1"/>`,
+  send: `<path ${S} d="M12 19V5M6 11l6-6 6 6"/>`,
+  trash: `<path ${S} d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M7 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h5.4a1.5 1.5 0 0 0 1.5-1.4L17 7"/>`,
 };
 const svg = (name) => `<svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
 const setIcon = (el, name) => { if (el.dataset.cur !== name) { el.innerHTML = svg(name); el.dataset.cur = name; } };
@@ -121,6 +124,8 @@ function pickView() {
   if (st.notif) return 'notif';
   if (now < st.volUntil) return 'vol';
   if (now < st.hudUntil) return 'hud';
+  const aiActive = window.pillvynAi && window.pillvynAi.state.active;
+  if (aiActive && (!st.stackOpen || st.stackKind === 'ai')) return 'ai';
   if (st.manual) return st.manual;
   if (st.shelfOn && st.shelf.length) return 'held';      // held files stay on the pill until they are taken out
   const m = st.media;
@@ -135,7 +140,8 @@ function updateTuck() {
   const want = !st.force && (st.full || (st.autoHide && st.covered));
   // dwelling on the very top edge of the screen peeks the island back out
   if (want && st.tucked && st.peekSince && now - st.peekSince > 220) { st.revealUntil = now + 1400; st.peekSince = 0; }
-  const reveal = st.notif || now < st.volUntil || now < st.hudUntil || dragging() || st.dragOut || st.scrubbing || st.volDrag || st.hover || st.typing || timer.running || (st.shelfOn && st.shelf.length && !st.full) || st.stackOpen || st.manual === 'gen' || now < st.revealUntil || now < st.holdUntil || (!st.tucked && now - st.leftAt < 900);   // a running timer stays on screen, fullscreen or not
+  const aiBusy = !!(window.pillvynAi && (window.pillvynAi.state.active || ['listening', 'transcribing', 'thinking', 'speaking'].includes(window.pillvynAi.state.mode)));
+  const reveal = st.notif || now < st.volUntil || now < st.hudUntil || dragging() || st.dragOut || st.scrubbing || st.volDrag || st.hover || st.typing || aiBusy || timer.running || (st.shelfOn && st.shelf.length && !st.full) || st.stackOpen || st.manual === 'gen' || now < st.revealUntil || now < st.holdUntil || (!st.tucked && now - st.leftAt < 900);   // a running timer stays on screen, fullscreen or not
   const tucked = !!(want && !reveal);
   island.classList.toggle('full', st.full);
   if (tucked !== st.tucked) {
@@ -149,9 +155,9 @@ function updateTuck() {
 }
 function render() {
   // nothing closes while a file is on its way out, while typing, or right after it was opened from the tray / a shortcut
-  const now = Date.now(), away = !st.hover && !st.dragOut && !st.volDrag && !st.typing && now > st.holdUntil;
-  // the password list and a fresh password stay until the user closes them: they are used together with another window
-  if (st.stackOpen && st.stackKind !== 'vault' && away && now - st.leftAt > 650) setStack(false);
+  const now = Date.now(), away = !st.hover && !st.dragOut && !st.volDrag && !st.typing && !st.keys && now > st.holdUntil;
+  // the password list, AI chat, and a fresh password stay until the user closes them
+  if (st.stackOpen && st.stackKind !== 'vault' && st.stackKind !== 'ai' && away && now - st.leftAt > 650) setStack(false);
   if (away && !st.stackOpen && now - st.leftAt > 380 && st.manual !== 'gen') st.manual = null;
   const viz = st.media.playing && musicOn() && st.visuals;
   if (viz !== st.vizOn) { st.vizOn = viz; window.pillvyn.setViz(viz); }
@@ -309,9 +315,11 @@ island.addEventListener('contextmenu', (e) => {
   chime('tick');
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && st.stackOpen && !st.typing && document.activeElement !== $('#v-search')) {
+  const act = document.activeElement;
+  if (e.key === 'Escape' && st.stackOpen && !st.typing && act !== $('#v-search') && act !== $('#ai-input') && act !== $('#ai-key-input')) {
     e.preventDefault();
-    setStack(false);
+    if (st.stackKind === 'ai' && window.pillvynAi) window.pillvynAi.closeAll();
+    else setStack(false);
   }
 });
 let flashT = 0;
@@ -540,11 +548,12 @@ window.pillvyn.clipsGet().then(setClips);
 
 function renderStack() {
   stackList.textContent = '';
-  if (st.stackKind !== 'vault' && st.stackKind !== 'settings' && stackHead.dataset.kind) { stackHead.textContent = ''; stackHead.dataset.kind = ''; stackHead.classList.remove('on'); }
+  if (st.stackKind !== 'vault' && st.stackKind !== 'settings' && st.stackKind !== 'ai' && stackHead.dataset.kind) { stackHead.textContent = ''; stackHead.dataset.kind = ''; stackHead.classList.remove('on'); }
   if (st.stackKind === 'files') { renderFiles(); return; }
   if (st.stackKind === 'clips') { renderClips(); return; }
   if (st.stackKind === 'notes') { renderNotes(); return; }
   if (st.stackKind === 'vault') { renderVault(); return; }
+  if (st.stackKind === 'ai') { renderAi(); return; }
   if (st.stackKind === 'settings') { renderSettings(); return; }
   if (st.stackKind === 'speedo') { renderSpeedo(); return; }
   if (st.stackKind === 'tour') { renderTour(); return; }
@@ -577,8 +586,9 @@ let freshT = 0;
 function setStack(open, kind) {
   kind = kind || st.stackKind;
   if (st.stackOpen === open && (!open || kind === st.stackKind)) return;
-  if (st.stackOpen && st.stackKind === 'vault') releaseKeys(true);      // leaving the passwords: the keyboard goes back
+  if (st.stackOpen && (st.stackKind === 'vault' || st.stackKind === 'ai' || st.stackKind === 'settings')) releaseKeys(true);
   if (open && kind === 'vault') { st.vaultQ = ''; st.vaultSel = 0; stackHead.dataset.kind = ''; }
+  if (open && kind === 'ai') { stackHead.dataset.kind = ''; }
   st.stackOpen = open;
   if (open) st.stackKind = kind;
   stackEl.classList.toggle('open', open);
@@ -587,17 +597,19 @@ function setStack(open, kind) {
   $('#t-clips').classList.toggle('active', open && st.stackKind === 'clips');
   $('#t-notes').classList.toggle('active', open && st.stackKind === 'notes');
   $('#t-vault').classList.toggle('active', open && st.stackKind === 'vault');
+  $('#t-ai').classList.toggle('active', open && st.stackKind === 'ai');
   $('#t-gear').classList.toggle('active', open && st.stackKind === 'settings');
   $('#t-speedo').classList.toggle('active', open && st.stackKind === 'speedo');
   if (open && kind === 'speedo') loadLocations();
   if (open && kind === 'vault') window.pillvyn.vaultList().then(setVault);
+  if (open && kind === 'ai' && window.pillvynAi) window.pillvynAi.refreshStatus();
   island.classList.remove('hover');
   if (open) {
     hideTip();
-    st.manual = 'tools';
+    st.manual = kind === 'ai' ? null : 'tools';
     if (kind === 'notifs') { st.unseen = 0; updateBadge(); }
     renderStack();
-    stackList.scrollTop = 0;
+    stackList.scrollTop = kind === 'ai' ? stackList.scrollHeight : 0;
     stackEl.classList.add('fresh'); clearTimeout(freshT); freshT = setTimeout(() => stackEl.classList.remove('fresh'), 800);
   }
   render();
@@ -1736,6 +1748,12 @@ $$('[data-act]').forEach((b) => b.addEventListener('click', async () => {
   if (a === 'settings') { setStack(!(st.stackOpen && st.stackKind === 'settings'), 'settings'); return; }
   if (a === 'notes') { if (st.stackOpen && st.stackKind === 'notes') setStack(false); else quickNote(); return; }
   if (a === 'vault') { setStack(!(st.stackOpen && st.stackKind === 'vault'), 'vault'); return; }
+  if (a === 'ai') {
+    if (st.stackOpen && st.stackKind === 'ai') { if (window.pillvynAi) window.pillvynAi.closeAll(); else setStack(false); }
+    else if (window.pillvynAi) window.pillvynAi.openPanel(false);
+    else setStack(true, 'ai');
+    return;
+  }
   if (a === 'clips') { setStack(!(st.stackOpen && st.stackKind === 'clips'), 'clips'); return; }
   if (a === 'speedo') { setStack(!(st.stackOpen && st.stackKind === 'speedo'), 'speedo'); return; }
   window.pillvyn.action(a);
@@ -1865,6 +1883,8 @@ function holdKeys(then) {
 window.addEventListener('focus', () => {
   const q = $('#v-search');
   if (st.keys && q && st.stackOpen && st.stackKind === 'vault' && document.activeElement !== q) q.focus();
+  const a = $('#ai-input');
+  if (st.keys && a && st.stackOpen && st.stackKind === 'ai' && document.activeElement !== a) a.focus();
 });
 // buttons under the pill never take the focus away from a search box
 stackEl.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
@@ -2205,11 +2225,170 @@ function renderSpeedo() {
   });
 }
 
+// ------------------------------------------------------------ PILLVYN AI Assistant stack
+function aiHead() {
+  if (stackHead.dataset.kind === 'ai') {
+    const ai = window.pillvynAi && window.pillvynAi.state;
+    const micBtn = $('#ai-head-mic');
+    if (micBtn && ai) micBtn.classList.toggle('live', ai.mode === 'listening');
+    return;
+  }
+  stackHead.dataset.kind = 'ai'; stackHead.textContent = ''; stackHead.classList.add('on');
+  const box = document.createElement('label'); box.className = 'search ai-search'; box.innerHTML = svg('ai');
+  const inp = document.createElement('input');
+  inp.id = 'ai-input'; inp.type = 'text'; inp.spellcheck = false; inp.autocomplete = 'off'; inp.dir = 'auto';
+  inp.placeholder = 'Ask PILLVYN… / از پیلوین بپرس…';
+  box.appendChild(inp);
+  box.addEventListener('pointerdown', () => holdKeys(() => inp.focus()));
+  inp.addEventListener('focus', () => holdKeys());
+  const submit = () => {
+    const val = inp.value.trim();
+    if (!val || !window.pillvynAi) return;
+    inp.value = '';
+    releaseKeys(false);
+    window.pillvynAi.sendText(val);
+  };
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); releaseKeys(true); if (window.pillvynAi) window.pillvynAi.closeAll(); else setStack(false); }
+  });
+  const mkBtn = (icon, title, cls, fn, id) => {
+    const b = document.createElement('button'); b.className = 'pillbtn round ' + cls; b.title = title;
+    if (id) b.id = id;
+    b.innerHTML = svg(icon); b.addEventListener('click', fn); return b;
+  };
+  const send = mkBtn('send', 'Send (Enter)', 'ai-send', submit, 'ai-head-send');
+  const mic = mkBtn('mic', 'Listen (RNNoise + Silero VAD + whisper.cpp)', 'ai-mic', () => { if (window.pillvynAi) window.pillvynAi.toggleMic(); }, 'ai-head-mic');
+  const clr = mkBtn('trash', 'Clear chat', '', () => { if (window.pillvynAi) window.pillvynAi.clearChat(); });
+  const cfg = mkBtn('gear', 'AI Settings', '', () => { st.settingsTab = 'ai'; st.holdUntil = Date.now() + 9000; setStack(true, 'settings'); });
+  const x = mkBtn('close', 'Close AI', '', () => { if (window.pillvynAi) window.pillvynAi.closeAll(); else setStack(false); });
+  stackHead.append(box, send, mic, clr, cfg, x);
+}
+function buildAiEngineCard() {
+  const ai = (window.pillvynAi && window.pillvynAi.state) || { status: {}, install: null };
+  const stt = ai.status || {};
+  const card = document.createElement('div'); card.className = 'row set ai-card'; card.style.setProperty('--i', 0);
+  const top = document.createElement('div'); top.className = 'ai-card-top';
+  const title = document.createElement('b'); title.textContent = 'Local Voice Pipeline';
+  const badge = document.createElement('span');
+  badge.className = 'ai-state-pill' + (stt.voiceReady ? ' ok' : '');
+  badge.textContent = stt.voiceReady ? 'Ready' : stt.installing || (ai.install && !ai.install.done) ? 'Installing…' : 'Setup needed';
+  top.append(title, badge);
+
+  const pills = document.createElement('div'); pills.className = 'ai-pills';
+  [
+    ['RNNoise', stt.rnnoise],
+    ['Silero VAD', stt.silero],
+    ['whisper.cpp', stt.whisperBin],
+    [stt.modelId === 'small-q5' ? 'Small-Q5' : 'Base FA+EN', stt.whisperModel],
+  ].forEach(([name, ok]) => {
+    const sp = document.createElement('span');
+    sp.className = 'ai-chip' + (ok ? ' ok' : '');
+    sp.textContent = (ok ? '✓ ' : '○ ') + name;
+    pills.appendChild(sp);
+  });
+  card.append(top, pills);
+
+  if (ai.install && (!ai.install.done || ai.install.error)) {
+    const pwrap = document.createElement('div'); pwrap.className = 'ai-prog-wrap';
+    const plbl = document.createElement('div'); plbl.className = 'ai-prog-lbl';
+    plbl.textContent = ai.install.error ? 'Error: ' + ai.install.error : `${ai.install.step} (${ai.install.pct || 0}%)`;
+    const bar = document.createElement('div'); bar.className = 'ai-prog';
+    const fill = document.createElement('i'); fill.style.width = clamp(ai.install.pct || 0, 0, 100) + '%';
+    bar.appendChild(fill);
+    pwrap.append(plbl, bar);
+    card.appendChild(pwrap);
+  }
+
+  const acts = document.createElement('div'); acts.className = 'ai-card-acts';
+  const dlBtn = document.createElement('button'); dlBtn.className = 'go' + (stt.voiceReady ? '' : ' solid');
+  dlBtn.textContent = stt.voiceReady ? 'Verify / Re-sync' : 'Download Voice Engine';
+  dlBtn.disabled = !!(stt.installing || (ai.install && !ai.install.done));
+  dlBtn.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.install(st.settings.aiWhisperModel || 'base'); });
+  acts.appendChild(dlBtn);
+  if (ai.dspError || ai.micError) {
+    const err = document.createElement('span'); err.className = 'dim ai-err-inline'; err.textContent = ai.dspError || ai.micError;
+    acts.appendChild(err);
+  }
+  card.appendChild(acts);
+  return card;
+}
+function renderAi() {
+  $('#stack-clear').classList.add('hidden');
+  aiHead();
+  const ai = (window.pillvynAi && window.pillvynAi.state) || { status: {}, messages: [], mode: 'idle' };
+  const stt = ai.status || {};
+
+  if (!stt.hasKey) {
+    const warn = document.createElement('div'); warn.className = 'row set sp ai-banner';
+    const l = document.createElement('span'); l.className = 'lbl';
+    l.innerHTML = '<b>OpenRouter API Key Needed</b><span class="dim">Stored encrypted with Windows DPAPI</span>';
+    const go = document.createElement('button'); go.className = 'go solid'; go.textContent = 'Set Key';
+    go.addEventListener('click', () => { st.settingsTab = 'ai'; st.holdUntil = Date.now() + 9000; setStack(true, 'settings'); });
+    warn.append(l, go);
+    stackList.appendChild(warn);
+  }
+
+  if (!stt.voiceReady || (ai.install && !ai.install.done)) {
+    stackList.appendChild(buildAiEngineCard());
+  }
+
+  if (!ai.messages.length) {
+    const intro = document.createElement('div'); intro.className = 'row set ai-welcome';
+    const hdr = document.createElement('div'); hdr.className = 'ai-welcome-hdr';
+    hdr.innerHTML = `<b>Hello, I’m PILLVYN AI</b><span class="dim">Ling 3.2 Flash · Auto FA/EN · Say “Hello PILLVYN” or try:</span>`;
+    const chips = document.createElement('div'); chips.className = 'ai-prompts';
+    [
+      'Set a 5 minute timer',
+      'سلام پیلوین! تایمر ۱۰ دقیقه بذار',
+      'Switch theme to Frosted Pearl',
+      'What can you do?',
+    ].forEach((prompt) => {
+      const bt = document.createElement('button'); bt.className = 'ai-prompt'; bt.dir = 'auto'; bt.textContent = prompt;
+      bt.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.sendText(prompt); });
+      chips.appendChild(bt);
+    });
+    intro.append(hdr, chips);
+    stackList.appendChild(intro);
+  } else {
+    ai.messages.forEach((m, i) => {
+      const row = document.createElement('div');
+      row.className = 'row set ai-msg ' + (m.role === 'user' ? 'user' : m.role === 'error' ? 'err' : 'bot');
+      row.style.setProperty('--i', Math.min(i, 6));
+      if (m.tools && m.tools.length) {
+        const tb = document.createElement('div'); tb.className = 'ai-tools';
+        m.tools.forEach((t) => { const c = document.createElement('span'); c.className = 'ai-tool-chip'; c.textContent = '✓ ' + t; tb.appendChild(c); });
+        row.appendChild(tb);
+      }
+      const txt = document.createElement('div'); txt.className = 'ai-msg-txt'; txt.dir = 'auto'; txt.textContent = m.text;
+      row.appendChild(txt);
+      if (m.role === 'assistant' && m.text) {
+        const bar = document.createElement('div'); bar.className = 'ai-msg-acts';
+        const spk = document.createElement('button'); spk.title = 'Speak with Edge TTS'; spk.innerHTML = svg('volume') + '<span>Speak</span>';
+        spk.addEventListener('click', () => { if (window.pillvynAi) window.pillvynAi.speak(m.text); });
+        const cp = document.createElement('button'); cp.title = 'Copy reply'; cp.innerHTML = svg('copy') + '<span>Copy</span>';
+        cp.addEventListener('click', () => { window.pillvyn.copy(m.text); flash('Copied reply'); });
+        bar.append(spk, cp);
+        row.appendChild(bar);
+      }
+      stackList.appendChild(row);
+    });
+  }
+
+  if (ai.mode === 'thinking' || ai.mode === 'transcribing') {
+    const busy = document.createElement('div'); busy.className = 'row set ai-msg bot ai-busy';
+    busy.innerHTML = `<span class="ai-dots"><i></i><i></i><i></i></span><span class="dim">${ai.mode === 'transcribing' ? 'Transcribing with whisper.cpp…' : 'Thinking with Ling 3.2 Flash…'}</span>`;
+    stackList.appendChild(busy);
+  }
+  stackList.scrollTop = stackList.scrollHeight;
+}
+
 // ------------------------------------------------------------ settings: categorized inline studio under the pill
 const SETTINGS_TABS = [
   ['appearance', 'palette', 'Style'],
   ['behavior', 'sliders', 'Behavior'],
   ['features', 'sparkles', 'Tools'],
+  ['ai', 'ai', 'AI'],
   ['about', 'info', 'About'],
 ];
 const SETTINGS_SECTIONS = {
@@ -2243,7 +2422,21 @@ const SETTINGS_SECTIONS = {
     ['toggle', 'deviceAlerts', 'Charger and Bluetooth'],
     ['toggle', 'netAlerts', 'Internet and VPN changes'],
     ['toggle', 'sensorDot', 'Microphone / camera in use'],
-    ['toggle', 'noteHotkey', 'Ctrl+Alt+N note · Ctrl+Alt+T text grab'],
+    ['toggle', 'noteHotkey', 'Ctrl+Alt+N note · T grab · A AI'],
+  ],
+  ai: [
+    ['aiEngineCard'],
+    ['sec', 'Wake Word & OpenRouter Brain'],
+    ['toggle', 'aiWakeWord', 'Wake word (“Hello PILLVYN” / «سلام پیلوین»)'],
+    ['seg', 'aiWhisperModel', 'Whisper STT model', [['base', 'Base (148M)'], ['small-q5', 'Small Q5 (190M)']]],
+    ['aiKeyRow'],
+    ['sec', 'Edge TTS (Persian & English)'],
+    ['toggle', 'aiTtsAuto', 'Speak assistant replies aloud'],
+    ['seg', 'aiTtsVoiceFa', 'Persian voice', [['fa-IR-DilaraNeural', 'Dilara'], ['fa-IR-FaridNeural', 'Farid']]],
+    ['seg', 'aiTtsVoiceEn', 'English voice', [['en-US-AvaNeural', 'Ava'], ['en-US-AndrewNeural', 'Andrew'], ['en-US-EmmaNeural', 'Emma'], ['en-US-BrianNeural', 'Brian']]],
+    ['step', 'aiTtsRate', 'Speech speed', -50, 100, '%', 10],
+    ['step', 'aiTtsVolume', 'Speech volume', 0, 100, '%', 10],
+    ['button', 'aiTestTts', 'Test Edge TTS voice', 'Speak'],
   ],
   about: [
     ['aboutCard'],
@@ -2299,15 +2492,53 @@ function renderSettings() {
       stackList.appendChild(h);
       return;
     }
+    if (type === 'aiEngineCard') {
+      stackList.appendChild(buildAiEngineCard());
+      return;
+    }
+    if (type === 'aiKeyRow') {
+      const box = document.createElement('div'); box.className = 'row set ai-key-box'; box.style.setProperty('--i', Math.min(i, 6));
+      const top = document.createElement('div'); top.className = 'ai-card-top';
+      const lbl = document.createElement('b'); lbl.textContent = 'OpenRouter API Key';
+      const mdl = document.createElement('span'); mdl.className = 'ai-model-tag'; mdl.textContent = s.aiModel || 'inclusionai/ling-3.2-flash:free';
+      top.append(lbl, mdl);
+      const rowIn = document.createElement('div'); rowIn.className = 'ai-key-in';
+      const inp = document.createElement('input');
+      inp.id = 'ai-key-input'; inp.type = 'password'; inp.spellcheck = false; inp.autocomplete = 'off';
+      inp.placeholder = s.aiHasKey ? `Saved (${s.aiKeyMasked}) · paste new key` : 'sk-or-v1-… (encrypted via DPAPI)';
+      inp.addEventListener('pointerdown', () => holdKeys(() => inp.focus()));
+      inp.addEventListener('focus', () => holdKeys());
+      const saveBtn = document.createElement('button'); saveBtn.className = 'go solid'; saveBtn.textContent = 'Save';
+      const doSave = async () => {
+        const val = inp.value.trim();
+        if (!val) return;
+        const ok = await window.pillvyn.aiSetKey(val);
+        inp.value = '';
+        releaseKeys(false);
+        if (ok) {
+          chime('tick');
+          flash('API key encrypted & saved');
+          if (window.pillvynAi) window.pillvynAi.refreshStatus();
+        } else {
+          flash('Could not save key');
+        }
+      };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
+      saveBtn.addEventListener('click', doSave);
+      rowIn.append(inp, saveBtn);
+      box.append(top, rowIn);
+      stackList.appendChild(box);
+      return;
+    }
     if (type === 'aboutCard') {
       const card = document.createElement('div'); card.className = 'row set about-card'; card.style.setProperty('--i', 0);
       const ic = document.createElement('img'); ic.className = 'about-logo'; ic.src = 'icon.png'; ic.alt = 'PILLVYN';
       const meta = document.createElement('div'); meta.className = 'about-meta';
       const title = document.createElement('div'); title.className = 'about-title';
       const name = document.createElement('b'); name.textContent = s.appName || 'PILLVYN';
-      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.2.0');
+      const ver = document.createElement('span'); ver.className = 'ver-pill'; ver.textContent = 'v' + (s.version || '3.3.0');
       title.append(name, ver);
-      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island for Windows · Studio Edition';
+      const sub = document.createElement('div'); sub.className = 'about-sub'; sub.textContent = 'Dynamic Island + Voice AI · Studio Edition';
       meta.append(title, sub);
       card.append(ic, meta);
       stackList.appendChild(card);
@@ -2403,7 +2634,13 @@ function renderSettings() {
       row.append(mk('minus', -1), num, mk('plus', 1));
     } else if (type === 'button') {
       const bt = document.createElement('button'); bt.className = 'go'; bt.textContent = a;
-      bt.addEventListener('click', () => { if (key === 'tour') setStack(true, 'tour'); else window.pillvyn.action(key); });
+      bt.addEventListener('click', () => {
+        if (key === 'tour') setStack(true, 'tour');
+        else if (key === 'aiTestTts' && window.pillvynAi) {
+          bt.textContent = 'Speaking…';
+          window.pillvynAi.speak('سلام! من پیلوین هستم. Hello, PILLVYN voice is ready.').then(() => { bt.textContent = a; });
+        } else window.pillvyn.action(key);
+      });
       row.appendChild(bt);
     }
     stackList.appendChild(row);
@@ -2427,6 +2664,7 @@ function renderSettings() {
 }
 // What PILLVYN can do: one row per feature, under the pill. A click on a row tries the thing itself.
 const TOUR = [
+  ['ai', 'PILLVYN AI Voice Assistant', 'Say “Hello PILLVYN” or ask in Persian & English with tools + Edge TTS', 'ai', 'Ctrl Alt A'],
   ['note', 'Now playing', 'Play something: cover, title and controls appear here'],
   ['bell', 'Notifications', 'One line on the pill. Click it to open that chat', 'inbox'],
   ['link', 'Smart copy', 'Copy a link, a sum or a date, then click the line'],
@@ -2460,9 +2698,13 @@ function renderTour() {
 // opened from the tray icon, or by starting the app a second time
 window.pillvyn.onOpen((what) => {
   st.holdUntil = Date.now() + 9000; st.revealUntil = Date.now() + 9000;
+  if (what === 'ai' && window.pillvynAi) { window.pillvynAi.openPanel(false); return; }
   setStack(true, what === 'settings' ? 'settings' : what === 'tour' ? 'tour' : st.stackKind);
 });
-window.pillvyn.onHotkey((what) => { if (what === 'note' && !st.typing) { st.holdUntil = Date.now() + 1500; quickNote(); } });
+window.pillvyn.onHotkey((what) => {
+  if (what === 'note' && !st.typing) { st.holdUntil = Date.now() + 1500; quickNote(); }
+  else if (what === 'ai' && !st.typing && window.pillvynAi) { st.holdUntil = Date.now() + 15000; window.pillvynAi.openPanel(true); }
+});
 
 // ------------------------------------------------------------ the face
 const face = $('#i-face');
@@ -2520,6 +2762,7 @@ const applySettings = (s) => {
   st.settings = s; st.lastUser = s.lastUser || '';
   st.gen.len = Number(s.vaultLength) || 18; st.gen.symbols = s.vaultSymbols !== false;
   if (st.stackOpen && st.stackKind === 'settings') { const y = stackList.scrollTop; renderStack(); stackList.scrollTop = y; }
+  if (window.pillvynAi) window.pillvynAi.syncStandby();
   tick(); render();
   if (!s.toured && !toured) {        // the first start: say hello and offer the list of what it can do
     toured = true;
@@ -2647,6 +2890,15 @@ window.pillvyn.onDownload((d) => {
 });
 window.pillvyn.onSettings(applySettings);
 window.pillvyn.getSettings().then(applySettings);
+function refreshAiView() {
+  if (!st.stackOpen) return;
+  if (st.stackKind === 'ai' || (st.stackKind === 'settings' && st.settingsTab === 'ai')) {
+    if (document.activeElement && (document.activeElement.id === 'ai-key-input')) return;
+    const y = stackList.scrollTop;
+    renderStack();
+    if (st.stackKind === 'settings') stackList.scrollTop = y;
+  }
+}
 syncSurfaceClasses(); paintVol(); tick(); updateBadge(); paintStatus(); render();
-window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, chime, showTip, hideTip, extractCoverAccent, setArt, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
+window.__pillvyn = { st, timer, showNotif, onNotif, onMedia, render, setStack, showHud, setShelf, quickNote, parseReminder, guessSite, emote, ask, tick, smart, calc, jalaliToGregorian, levels, triggerSheen, applySettings, chime, showTip, hideTip, extractCoverAccent, setArt, refreshAiView, fake: (v) => { st.fakeLevels = v; } };   // debug hooks
 })();

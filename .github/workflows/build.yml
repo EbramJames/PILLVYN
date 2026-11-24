@@ -33,6 +33,7 @@ jobs:
         run: |
           node --check ui/bridge.js
           node --check ui/app.js
+          node --check ui/ai.js
 
       - name: Check Rust formatting, lints, and unit tests
         working-directory: src-tauri

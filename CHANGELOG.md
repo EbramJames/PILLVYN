@@ -2,6 +2,18 @@
 
 All notable changes to **PILLVYN** are documented here.
 
+## [3.3.0] - 2026-11-24
+
+### Added
+- **PILLVYN Voice AI Assistant Pipeline (End-to-End Bilingual Persian & English):**
+  - **Wake Word Detection (`"Hello PILLVYN"` / `«سلام پیلوین»`):** Hands-free wake-word activation with fuzzy phonetic matching and one-breath inline command extraction (e.g., `"Hello PILLVYN, set a 5 minute timer"`), alongside a dedicated global hotkey (`Ctrl+Alt+A`), toolbar button, and System Tray shortcut.
+  - **Real-Time Neural Noise Removal (RNNoise):** Native Windows WASAPI 48 kHz microphone capture (`src-tauri/src/ai_mic.rs`) denoised frame-by-frame with official Xiph.org **RNNoise** WebAssembly (`480`-sample 10 ms frames) to strip fan noise, background hum, and microphone hiss.
+  - **Neural Voice Activity Detection (Silero VAD ONNX):** Runs official **Silero VAD v5** (`silero_vad.onnx`) via single-threaded SIMD ONNX Runtime Web with stateful LSTM inference, 480 ms pre-roll buffering, and smart silence-based sentence endpointing so incomplete pauses mid-sentence are never sent prematurely.
+  - **Local Speech-to-Text (`whisper.cpp`):** Managed local `whisper-server.exe` (`--language auto`, `--suppress-nst`, bilingual initial prompt) with hot-in-RAM multilingual `ggml-base.bin` / `ggml-small-q5_1.bin` models for fast automatic Persian and English recognition.
+  - **Smart Brain (`OpenRouter` · `inclusionai/ling-3.2-flash:free`):** Native Windows WinHTTP OpenAI-compatible Chat Completions engine (`src-tauri/src/net_http.rs`, `src-tauri/src/ai.rs`) with DPAPI-encrypted API key storage, multi-turn memory, automatic `429`/`503` retry backoff, valid JSON output, and a multi-step **Function Calling / Tool Calling** loop controlling 12 live PILLVYN/Windows actions (timer, media, volume, mute, notes & reminders, clipboard read/write, theme switching, safe URL opening, screenshot, OCR, and Do Not Disturb).
+  - **Neural Text-to-Speech (Microsoft Edge TTS):** Native WinHTTP WebSocket synthesis (`Sec-MS-GEC` SHA-256 protocol) generating MP3 speech in Persian (`fa-IR-DilaraNeural`, `fa-IR-FaridNeural`) and English (`en-US-AvaNeural`, `en-US-AndrewNeural`, `en-US-EmmaNeural`, `en-US-BrianNeural`) with auto-language voice selection, speed (`-50%` to `+100%`), volume (`0%` to `100%`), and echo-guarded playback.
+- **Apple-Intelligence-Inspired AI Pill & Settings → AI Studio:** Added an animated energy-reactive AI orb view (`[data-view="ai"]`), inline bilingual conversation panel with tool-call badges, quick prompts, replay/copy controls, one-click local prerequisites downloader with live progress bar, and a 5th **AI** tab inside Settings Studio.
+
 ## [3.2.0] - 2026-11-23
 
 ### Added
